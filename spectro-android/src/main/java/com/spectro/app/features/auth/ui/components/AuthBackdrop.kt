@@ -1,0 +1,148 @@
+﻿package com.spectro.app.features.auth.ui.components
+
+// Android resources
+import androidx.annotation.DrawableRes
+// Compose layouts and foundations
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+// Material 3 components
+import androidx.compose.material3.MaterialTheme
+// Compose state and runtime
+import androidx.compose.runtime.Composable
+// UI styling and utilities
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.BiasAlignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+// Project resources
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+import com.spectro.app.features.auth.ui.AuthDimens
+
+// Photo that fades into the background with the content of the screen over it, at the bottom in portrait
+// and on the other half in landscape
+@Composable
+fun AuthBackdrop(
+    @DrawableRes photo: Int,
+    focusBias: Float,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val background = MaterialTheme.colorScheme.background
+
+    // Fade of the photo in portrait, eased at both ends so it does not show where it starts
+    val fade = Array(AuthDimens.PhotoFadeSteps) { step ->
+        val progress = step / (AuthDimens.PhotoFadeSteps - 1f)
+        val position = AuthDimens.PortraitFadeStart + (AuthDimens.PortraitFadeEnd - AuthDimens.PortraitFadeStart) * progress
+        position to background.copy(alpha = progress * progress * (3f - 2f * progress))
+    }
+
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .background(background)
+    ) {
+        if (maxWidth > maxHeight) {
+            // Photo on the left fading to the right, the content on the other half
+            Row(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                    AuthPhoto(photo = photo, focusBias = focusBias, modifier = Modifier.fillMaxSize())
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(
+                                Brush.horizontalGradient(
+                                    AuthDimens.PhotoFadeStart to Color.Transparent,
+                                    1f to background
+                                )
+                            )
+                    )
+                }
+
+                AuthContent(
+                    alignment = Alignment.Center,
+                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                    content = content
+                )
+            }
+        } else {
+            // Photo on the top fading to the background, the content at the bottom
+            Box(modifier = Modifier.fillMaxSize()) {
+                AuthPhoto(
+                    photo = photo,
+                    focusBias = focusBias,
+                    modifier = Modifier.fillMaxWidth().fillMaxHeight(AuthDimens.PhotoHeightFraction)
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Brush.verticalGradient(*fade))
+                )
+
+                AuthContent(
+                    alignment = Alignment.BottomCenter,
+                    modifier = Modifier.fillMaxSize(),
+                    content = content
+                )
+            }
+        }
+    }
+}
+
+// Decorative photo, cropped around the face
+@Composable
+private fun AuthPhoto(
+    @DrawableRes photo: Int,
+    focusBias: Float,
+    modifier: Modifier = Modifier
+) {
+    Image(
+        painter = painterResource(photo),
+        contentDescription = null,
+        modifier = modifier,
+        contentScale = ContentScale.Crop,
+        alignment = BiasAlignment(0f, focusBias)
+    )
+}
+
+// Content centered in its area, kept clear of the cutout and the system bars, and it scrolls when the screen is too short for it
+@Composable
+private fun AuthContent(
+    alignment: Alignment,
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    val dimens = SpectroTheme.dimens
+
+    Box(
+        modifier = modifier
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = dimens.screenPadding, vertical = dimens.spaceExtraLarge),
+        contentAlignment = alignment
+    ) {
+        Column(
+            modifier = Modifier
+                .widthIn(max = AuthDimens.ContentMaxWidth)
+                .verticalScroll(rememberScrollState()),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            content = content
+        )
+    }
+}

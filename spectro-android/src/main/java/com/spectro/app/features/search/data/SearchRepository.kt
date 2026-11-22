@@ -1,0 +1,59 @@
+﻿package com.spectro.app.features.search.data
+
+// Android context
+import android.content.Context
+// Project resources
+import com.spectro.app.features.settings.data.PrivacyPrefs
+import com.spectro.app.core.innertube.InnerTubeClient
+import com.spectro.app.core.innertube.currentSession
+import com.spectro.app.core.innertube.YouTubeSession
+
+// What the search asks of YouTube Music, with the account only when the user signed in with Google
+class SearchRepository(context: Context) {
+    private val appContext = context.applicationContext
+
+    // Words and matches for what was typed so far
+    suspend fun suggestions(input: String): Result<List<SearchSuggestion>> =
+        InnerTubeClient.searchSuggestions(currentSession(appContext), input).mapCatching(SearchParser::parseSuggestions)
+
+    // Searches the account suggests with nothing typed, apart from its history, none for a guest
+    suspend fun suggestedSearches(): List<String> =
+        InnerTubeClient.searchSuggestions(currentSession(appContext), "")
+            .mapCatching { SearchParser.parseSuggestions(it).filterIsInstance<SearchSuggestion.Words>().filterNot { words -> words.isHistory }.map { words -> words.text } }
+            .getOrDefault(emptyList())
+
+    // The searches kept by the account, null when the user did not sign in with Google
+    // With no input the account gives its latest ones, which are the ones shown
+    suspend fun accountHistory(): Result<List<SearchSuggestion.Words>?> {
+        val session = currentSession(appContext)
+        if (session.cookies == null) return Result.success(null)
+
+        return historyOf(session, "")
+    }
+
+    // The searches of the account that the suggestions of an input bring
+    private suspend fun historyOf(session: YouTubeSession, input: String): Result<List<SearchSuggestion.Words>> =
+        InnerTubeClient.searchSuggestions(session, input)
+            .mapCatching { SearchParser.parseSuggestions(it).filterIsInstance<SearchSuggestion.Words>().filter { words -> words.isHistory } }
+
+    // Takes searches out of the history of the account
+    suspend fun removeFromAccount(tokens: List<String>): Result<Unit> {
+        if (tokens.isEmpty()) return Result.success(Unit)
+
+        return InnerTubeClient.feedback(currentSession(appContext), tokens).map { }
+    }
+
+    // The first page of a search under a filter
+    // A search the app makes on its own, such as finding an artist by the name, goes without the account so YouTube does not keep it as one of the user
+    suspend fun search(query: String, category: SearchCategory, keepsHistory: Boolean = true): Result<SearchPage> {
+        val session = currentSession(appContext).let { if (!keepsHistory || PrivacyPrefs.pauseSearchHistory) it.copy(cookies = null) else it }
+        val page = InnerTubeClient.search(session, query = query, params = category.params)
+            .mapCatching { SearchParser.parsePage(it, category) }
+
+        return page
+    }
+
+    // The next page of a search under a filter
+    suspend fun more(continuation: String): Result<SearchPage> =
+        InnerTubeClient.search(currentSession(appContext), continuation = continuation).mapCatching(SearchParser::parseContinuation)
+}

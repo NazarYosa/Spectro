@@ -1,0 +1,931 @@
+﻿package com.spectro.app.features.library.ui
+
+// Compose layouts and foundations
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items as gridItems
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import com.spectro.app.core.navigation.MainTab
+import com.spectro.app.core.navigation.OnTabLeft
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+// Material 3 components
+import android.text.format.Formatter
+import androidx.activity.compose.BackHandler
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.pullToRefresh
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+// Compose state and runtime
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+// UI styling and utilities
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+// Images and lifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import coil3.compose.AsyncImage
+// Coroutines and random
+import kotlin.random.Random
+// Project resources
+import com.spectro.app.core.designsystem.theme.SpectroMotion
+import com.spectro.app.core.innertube.resize
+import com.spectro.app.features.like.data.Likes
+import com.spectro.app.features.playlist.ui.SortChoice
+import com.spectro.app.features.playlist.ui.SortChoiceSheet
+import com.spectro.app.features.playlist.ui.SortWay
+import com.spectro.app.R
+import com.spectro.app.core.designsystem.components.ConfirmDialog
+import com.spectro.app.core.designsystem.components.OverlaySheet
+import com.spectro.app.core.designsystem.components.SelectionBar
+import com.spectro.app.core.designsystem.components.SelectionBarSpace
+import com.spectro.app.core.designsystem.components.SelectionHeader
+import com.spectro.app.core.designsystem.components.SkeletonHost
+import com.spectro.app.core.designsystem.components.skeleton
+import com.spectro.app.core.designsystem.icons.SpectroIcons
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+import com.spectro.app.features.home.data.HomeItem
+import com.spectro.app.features.home.data.HomeItemKind
+import com.spectro.app.features.home.data.PlaylistPagePrefix
+import com.spectro.app.features.home.ui.components.HomeMessage
+import com.spectro.app.features.home.ui.rememberItemPlayer
+import com.spectro.app.features.home.ui.rememberListPlayer
+import com.spectro.app.features.home.ui.toPlayableTrack
+import com.spectro.app.features.collection.ui.shareLink
+import com.spectro.app.core.playback.PlayerConnection
+import com.spectro.app.features.library.data.LibrarySource
+import com.spectro.app.features.menu.ItemMenu
+import com.spectro.app.features.collection.ui.CollectionMenu
+import com.spectro.app.features.collection.ui.CollectionMenuData
+import com.spectro.app.features.playlist.ui.EditPlaylist
+import com.spectro.app.features.playlist.ui.EditPlaylistData
+import com.spectro.app.features.playlist.ui.NewPlaylist
+import com.spectro.app.features.playlist.ui.SaveToPlaylist
+import com.spectro.app.core.designsystem.components.InlineSearchField as PodcastSearchField
+import com.spectro.app.features.player.ui.LocalMiniPlayerInset
+import com.spectro.app.features.profile.ui.LocalProfile
+import com.spectro.app.features.profile.ui.components.ProfileAvatar
+import com.spectro.app.core.designsystem.components.Toasts
+
+// The library, the buttons that choose what is listed, the order and how it is drawn, and the list of what the account saved
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LibraryScreen(
+    onProfileClick: () -> Unit,
+    onFindMusic: () -> Unit,
+    onHistoryClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    onFindPodcasts: () -> Unit = {},
+    viewModel: LibraryViewModel = viewModel()
+) {
+    val state by viewModel.state.collectAsState()
+    val onItemClick = rememberItemPlayer()
+    val playList = rememberListPlayer()
+    val context = LocalContext.current
+    val resources = LocalResources.current
+    val profileName = LocalProfile.current.name
+
+    // A group that another screen asked for, such as the playlists from the Home, opens once what was on the library has come
+    val requestedGroup by LibraryRequest.pending.collectAsState()
+    LaunchedEffect(requestedGroup, state.status) {
+        val group = requestedGroup ?: return@LaunchedEffect
+        if (state.status == LibraryStatus.Loading) return@LaunchedEffect
+
+        if (state.group != group) viewModel.selectGroup(group)
+        LibraryRequest.clear()
+    }
+
+    // The playlist waiting for the yes before it is deleted
+    var deleting by remember { mutableStateOf<HomeItem?>(null) }
+    deleting?.let { item ->
+        ConfirmDialog(
+            title = stringResource(R.string.playlist_delete_title),
+            text = stringResource(R.string.playlist_delete_text, item.title),
+            confirmLabel = stringResource(R.string.playlist_delete_confirm),
+            cancelLabel = stringResource(R.string.playlist_cancel),
+            onConfirm = {
+                deleting = null
+                viewModel.delete(item) { isDone ->
+                    val message = if (isDone) resources.getString(R.string.playlist_deleted, item.title) else resources.getString(R.string.playlist_action_error)
+                    Toasts.show(message, isError = !isDone)
+                }
+            },
+            onDismiss = { deleting = null }
+        )
+    }
+
+    // An album or a playlist has the menu of its page, the other items have their own
+    val openMenu: (HomeItem) -> Unit = { item ->
+        if (item.kind == HomeItemKind.Album || item.kind == HomeItemKind.Playlist) {
+            CollectionMenu.show(
+                CollectionMenuData(
+                    id = item.id,
+                    kindName = item.kind.name,
+                    title = item.title,
+                    // The line under the name without the kind that comes first in it
+                    subtitle = lineOf(item)?.split(" \u2022 ")?.let { parts -> if (parts.size > 1) parts.drop(1) else parts }?.joinToString(" \u2022 "),
+                    coverUrl = item.thumbnailUrl,
+                    onShuffle = { viewModel.withTracks(item) { songs -> playList(songs, if (songs.isEmpty()) 0 else Random.nextInt(songs.size), true) } },
+                    onPlayNext = { viewModel.withTracks(item) { songs -> PlayerConnection.enqueueAll(context, songs.mapNotNull { it.toPlayableTrack() }, afterCurrent = true) } },
+                    onAddToQueue = { viewModel.withTracks(item) { songs -> PlayerConnection.enqueueAll(context, songs.mapNotNull { it.toPlayableTrack() }, afterCurrent = false) } },
+                    onShare = { shareLink(context, viewModel.shareUrl(item)) },
+                    onSaveToPlaylist = { viewModel.withTracks(item) { songs -> SaveToPlaylist.show(songs.map { it.id }) } },
+                    onEdit = if (isOwned(item, profileName)) ({ EditPlaylist.show(EditPlaylistData(id = item.id, title = item.title, description = null, privacy = null, coverUrl = item.thumbnailUrl)) }) else null,
+                    onDelete = if (isOwned(item, profileName)) ({ deleting = item }) else null
+                )
+            )
+        } else {
+            ItemMenu.show(item, removesFromLibrary = state.group == LibraryGroup.Songs)
+        }
+    }
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+
+    // Back at the top when the tab is opened again
+    OnTabLeft(MainTab.LIBRARY.route) {
+        listState.scrollToItem(0)
+        gridState.scrollToItem(0)
+    }
+
+    // Songs being marked, on or off and the ids of the ones marked, back leaves the mode before it leaves the screen, and so does going to another list
+    var isSelecting by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+    val leaveSelection = {
+        isSelecting = false
+        selectedIds = emptySet()
+    }
+    BackHandler(enabled = isSelecting, onBack = leaveSelection)
+    LaunchedEffect(state.source, state.group) { leaveSelection() }
+
+    val selectable = state.shown
+
+    // The next page of the list is asked when its end comes near, in the list and in the covers
+    val isGrid = state.isGrid
+    LaunchedEffect(listState, gridState, isGrid, state.items.size) {
+        snapshotFlow {
+            if (isGrid) gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index?.minus(gridState.layoutInfo.totalItemsCount - 1) ?: 0
+            else (listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0) - (listState.layoutInfo.totalItemsCount - 1)
+        }.collect { fromEnd -> if (fromEnd >= -LibraryDimens.LoadMoreDistance) viewModel.loadMore() }
+    }
+
+    // The songs marked in the list of the covers too, so the covers do not give way to rows
+    val onItemTap: (HomeItem) -> Unit = { item ->
+        if (isSelecting) selectedIds = if (item.id in selectedIds) selectedIds - item.id else selectedIds + item.id
+        else onItemClick(item)
+    }
+
+    // The yes asked before the marked songs leave the library of the account
+    var isRemovingSongs by remember { mutableStateOf(false) }
+
+    // The button that makes something new loses its words while the list goes down and gets them back when it goes up
+    var isActionWide by remember { mutableStateOf(true) }
+    val refreshState = rememberPullToRefreshState()
+    val scrollDirection = remember {
+        object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < -ActionScrollThreshold) isActionWide = false else if (available.y > ActionScrollThreshold) isActionWide = true
+                return Offset.Zero
+            }
+        }
+    }
+    LaunchedEffect(state.source, state.group) { isActionWide = true }
+
+    Box(modifier = modifier.fillMaxSize().nestedScroll(scrollDirection)) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // The search grows from the icon to the whole width while the header fades, and goes back the same way
+            val isSearchOpen = state.query != null
+            val searchProgress by animateFloatAsState(
+                targetValue = if (isSearchOpen) 1f else 0f,
+                animationSpec = tween(LibraryDimens.SearchMillis),
+                label = "LibrarySearch"
+            )
+            if (isSelecting) SelectionHeader(
+                count = selectedIds.size,
+                allSelected = selectedIds.size == selectable.size,
+                onExit = leaveSelection,
+                onToggleAll = { selectedIds = if (selectedIds.size == selectable.size) emptySet() else selectable.mapTo(HashSet()) { it.id } }
+            ) else Box {
+                LibraryHeader(
+                    onProfileClick = if (isSearchOpen) ({}) else onProfileClick,
+                    onHistoryClick = if (isSearchOpen) ({}) else onHistoryClick,
+                    onSearchClick = if (isSearchOpen) ({}) else viewModel::startSearch,
+                    modifier = Modifier.alpha(1f - searchProgress)
+                )
+                if (searchProgress > 0f) {
+                    // Under the status bar and the cutout, as the header is
+                    Box(modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
+                        PodcastSearchField(
+                            query = state.query.orEmpty(),
+                            onQueryChange = viewModel::setQuery,
+                            onClose = viewModel::stopSearch,
+                            hint = stringResource(R.string.library_search_hint),
+                            progress = searchProgress
+                        )
+                    }
+                }
+            }
+
+            LibraryChips(
+                group = state.group,
+                source = state.source,
+                onGroupClick = viewModel::selectGroup,
+                onSourceClick = viewModel::selectSource,
+                onClear = viewModel::clear
+            )
+
+            run {
+                // The list goes back to its top with the new order, or it would stay on the item it was and follow it to wherever it goes
+                val pick: (LibrarySort) -> Unit = { sort ->
+                    listState.requestScrollToItem(0)
+                    gridState.requestScrollToItem(0)
+                    val remote = state.remoteOf(sort)
+                    if (remote != null) viewModel.selectRemoteSort(remote) else viewModel.selectSort(sort)
+                }
+                val remoteOn = state.remoteSorts.firstOrNull { !state.isLocalOrder && it.title == state.remoteSelected }
+
+                // The orders that only go one way, the ones YouTube Music says or the one the list comes in
+                val plain = if (state.remoteSorts.isEmpty()) {
+                    state.sorts.map { sort -> SortChoice(stringResource(sort.titleRes), sort == state.sort) { pick(sort) } }
+                } else {
+                    state.remoteSorts.filterNot { it.isAToZ || it.isZToA }.map { option ->
+                        SortChoice(option.title, option == remoteOn) {
+                            listState.requestScrollToItem(0)
+                            gridState.requestScrollToItem(0)
+                            viewModel.selectRemoteSort(option)
+                        }
+                    }
+                }
+
+                // The ones that go two ways, both in words at the end of the row
+                val isOn: (LibrarySort) -> Boolean = { sort -> sort == state.sort || (remoteOn != null && remoteOn == state.remoteOf(sort)) }
+                val twoWays = state.offeredKinds.map { kind ->
+                    val current = listOf(kind.first, kind.second).firstOrNull(isOn)
+                    SortChoice(
+                        title = stringResource(kind.titleRes),
+                        isSelected = current != null,
+                        ways = listOf(kind.first, kind.second).map { sort -> SortWay(stringResource(sort.wordRes), isOn(sort)) { pick(sort) } }
+                    ) { pick(current ?: kind.first) }
+                }
+
+                // Above the list the order is a phrase, and the one by the name of YouTube Music says it the same as the one made here
+                val remoteName = listOf(LibrarySort.AToZ, LibrarySort.ZToA).firstOrNull { remoteOn != null && remoteOn == state.remoteOf(it) }
+                SortLine(
+                    title = when {
+                        remoteName != null -> stringResource(remoteName.titleRes)
+                        remoteOn != null -> remoteOn.title
+                        else -> stringResource(state.sort.titleRes)
+                    },
+                    isGrid = state.isGrid,
+                    showViewToggle = state.group != LibraryGroup.Device,
+                    onSortClick = {
+                        OverlaySheet.show {
+                            SortChoiceSheet(
+                                title = stringResource(R.string.library_sort_by),
+                                choices = plain + null + twoWays,
+                                onDismiss = OverlaySheet::dismiss
+                            )
+                        }
+                    },
+                    onViewClick = viewModel::toggleGrid,
+                    onSelectClick = if (state.group == LibraryGroup.Songs && !isSelecting && selectable.isNotEmpty()) ({ isSelecting = true }) else null
+                )
+            }
+
+            val shown = state.shown
+            key(state.sort, state.remoteSelected) { when {
+                state.group == LibraryGroup.Device -> DeviceList(
+                    query = state.query,
+                    sort = state.sort,
+                    onPlay = playList,
+                    modifier = Modifier.weight(1f)
+                )
+
+                state.status == LibraryStatus.Loading -> RowsSkeleton(modifier = Modifier.weight(1f))
+
+                state.status == LibraryStatus.Error -> HomeMessage(
+                    text = stringResource(R.string.library_error),
+                    modifier = Modifier.weight(1f),
+                    actionLabel = stringResource(R.string.home_retry),
+                    onAction = { viewModel.load() }
+                )
+
+                shown.isEmpty() && state.query?.isNotBlank() == true -> EmptyList(
+                    icon = SpectroIcons.Search,
+                    text = stringResource(R.string.library_no_results),
+                    onFindMusic = null,
+                    modifier = Modifier.weight(1f)
+                )
+
+                shown.isEmpty() -> EmptyList(
+                    icon = emptyIconOf(state.source),
+                    text = stringResource(emptyTextOf(state.source)),
+                    onFindMusic = onFindMusic,
+                    modifier = Modifier.weight(1f)
+                )
+
+                // The covers and the rows, one fades into the other as the button is pressed
+                else -> Crossfade(
+                    targetState = state.isGrid,
+                    animationSpec = tween(SpectroMotion.ExpandMillis),
+                    label = "LibraryView",
+                    modifier = Modifier
+                        .weight(1f)
+                        .pullToRefresh(state = refreshState, isRefreshing = state.isRefreshing, onRefresh = viewModel::pullRefresh)
+                        .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+                ) { isCovers ->
+                    if (isCovers) {
+                        LazyVerticalGrid(
+                            state = gridState,
+                            columns = GridCells.Adaptive(LibraryDimens.GridCell),
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(
+                                start = LibraryDimens.Side,
+                                end = LibraryDimens.Side,
+                                top = LibraryDimens.GridTextTop,
+                                bottom = LocalMiniPlayerInset.current + LibraryDimens.ListBottom + if (isSelecting) SelectionBarSpace else 0.dp
+                            ),
+                            horizontalArrangement = Arrangement.spacedBy(LibraryDimens.GridGap),
+                            verticalArrangement = Arrangement.spacedBy(LibraryDimens.GridRowGap)
+                        ) {
+                            gridItems(shown, key = { it.id }) { item ->
+                                LibraryCover(
+                                    item = item,
+                                    isSelected = if (isSelecting) item.id in selectedIds else null,
+                                    onClick = { onItemTap(item) },
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
+                        }
+                    } else {
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(bottom = LocalMiniPlayerInset.current + LibraryDimens.ListBottom + if (isSelecting) SelectionBarSpace else 0.dp)
+                        ) {
+                            items(shown, key = { it.id }) { item ->
+                                LibraryRow(
+                                    item = item,
+                                    onClick = { onItemTap(item) },
+                                    onMenu = { openMenu(item) },
+                                    isSelected = if (isSelecting) item.id in selectedIds else null
+                                )
+                            }
+                        }
+                    }
+                }
+            } }
+        }
+
+        // The mark that shows while the list is pulled, under the header and the buttons
+        PullToRefreshDefaults.Indicator(
+            state = refreshState,
+            isRefreshing = state.isRefreshing,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))
+                .padding(top = LibraryDimens.RefreshTop)
+        )
+
+        // The button that makes something new, only in its place for now
+        if (state.group != LibraryGroup.Device && (state.source == LibrarySource.Recent || state.source == LibrarySource.Playlists)) {
+            NewButton(
+                text = stringResource(R.string.library_new_playlist),
+                isWide = isActionWide,
+                onClick = { NewPlaylist.show() },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = LibraryDimens.ActionEnd, bottom = LocalMiniPlayerInset.current + LibraryDimens.ActionBottom)
+            )
+        }
+
+        // What can be done with the marked songs, over the mini player and the bar of the screens
+        if (isSelecting) {
+            val marked = selectable.filter { it.id in selectedIds }
+            val tracks = marked.mapNotNull { it.toPlayableTrack() }
+            SelectionBar(
+                hasSelection = marked.isNotEmpty(),
+                onPlayNext = {
+                    PlayerConnection.enqueueAll(context, tracks, afterCurrent = true)
+                    leaveSelection()
+                },
+                onAddToQueue = {
+                    PlayerConnection.enqueueAll(context, tracks, afterCurrent = false)
+                    leaveSelection()
+                },
+                onSave = {
+                    SaveToPlaylist.show(marked.map { it.id })
+                    leaveSelection()
+                },
+                onDownload = null,
+                onRemoveDownload = null,
+                onRemoveFromLibrary = if (state.group == LibraryGroup.Songs) ({ isRemovingSongs = true }) else null,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = LocalMiniPlayerInset.current)
+            )
+
+            if (isRemovingSongs) {
+                ConfirmDialog(
+                    title = stringResource(R.string.playlist_selection_remove_title),
+                    text = pluralStringResource(R.plurals.library_selection_remove_text, marked.size, marked.size),
+                    confirmLabel = stringResource(R.string.download_remove_confirm),
+                    cancelLabel = stringResource(R.string.playlist_cancel),
+                    onConfirm = {
+                        isRemovingSongs = false
+                        Likes.removeAll(context, marked)
+                        leaveSelection()
+                    },
+                    onDismiss = { isRemovingSongs = false }
+                )
+            }
+        }
+    }
+}
+
+// The name of the screen on the left, and on the right the history, the search and the photo of the account
+@Composable
+private fun LibraryHeader(onProfileClick: () -> Unit, onHistoryClick: () -> Unit, onSearchClick: () -> Unit, modifier: Modifier = Modifier) {
+    val profile = LocalProfile.current
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
+            .padding(horizontal = LibraryDimens.Side, vertical = LibraryDimens.HeaderTop)
+    ) {
+        Text(
+            text = stringResource(R.string.nav_library),
+            style = MaterialTheme.typography.headlineSmall.merge(LibraryType.Title),
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.weight(1f)
+        )
+
+        IconButton(onClick = onHistoryClick) {
+            Icon(imageVector = SpectroIcons.History, contentDescription = stringResource(R.string.history_title), tint = MaterialTheme.colorScheme.onBackground)
+        }
+        IconButton(onClick = onSearchClick) {
+            Icon(imageVector = SpectroIcons.Search, contentDescription = stringResource(R.string.library_search_hint), tint = MaterialTheme.colorScheme.onBackground)
+        }
+        ProfileAvatar(
+            photo = profile.photo,
+            size = LibraryDimens.ViewIcon + LibraryDimens.GridTextTop,
+            modifier = Modifier.clickable(onClick = onProfileClick)
+        )
+    }
+}
+
+// The buttons of the top, with none on they are all there, with one on only it stays, with a cross before it that turns it off, and the lists of the same button come after it
+@Composable
+private fun LibraryChips(
+    group: LibraryGroup?,
+    source: LibrarySource,
+    onGroupClick: (LibraryGroup) -> Unit,
+    onSourceClick: (LibrarySource) -> Unit,
+    onClear: () -> Unit
+) {
+    // The button that is on goes first, then the others, a button with more than one list shows the rest of them after it
+    val order = if (group != null) listOf(group) + LibraryGroup.entries.filter { it != group } else LibraryGroup.entries
+
+    FilterChipRow(
+        scrollKey = group,
+        contentPadding = PaddingValues(horizontal = LibraryDimens.Side, vertical = LibraryDimens.ChipsVertical),
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+    ) {
+        ChipSlot(gap = LibraryDimens.ChipGap, isVisible = group != null, fadesOut = false) { ClearChip(onClick = onClear) }
+
+        order.forEach { entry ->
+            key(entry) {
+                val isGroup = entry == group
+                val hasLists = entry.sources.size > 1
+
+                ChipSlot(gap = LibraryDimens.ChipGap, isVisible = group == null || isGroup) {
+                    Chip(text = stringResource(entry.titleRes), isOn = isGroup && (!hasLists || source == entry.sources.first())) {
+                        if (group == null) onGroupClick(entry) else if (hasLists) onSourceClick(entry.sources.first())
+                    }
+                }
+
+                if (isGroup && hasLists) {
+                    entry.sources.drop(1).forEachIndexed { index, other ->
+                        key(other) {
+                            ChipSlot(gap = LibraryDimens.ChipGap) {
+                                Chip(text = stringResource(entry.sourceTitles[index + 1]), isOn = other == source) { onSourceClick(other) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// A button of the top, light when it is on
+@Composable
+internal fun Chip(text: String, isOn: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .height(LibraryDimens.ChipHeight)
+            .clip(RoundedCornerShape(LibraryDimens.ChipCorner))
+            .background(if (isOn) MaterialTheme.colorScheme.onBackground else SpectroTheme.colors.chip)
+            .clickable(onClick = onClick)
+            .padding(horizontal = LibraryDimens.ChipPaddingX)
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyMedium.merge(LibraryType.Chip),
+            color = if (isOn) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onBackground,
+            maxLines = 1
+        )
+    }
+}
+
+// The order in use with the arrow that changes it, and the button that changes between rows and covers
+@Composable
+private fun SortLine(title: String, isGrid: Boolean, showViewToggle: Boolean, onSortClick: () -> Unit, onViewClick: () -> Unit, onSelectClick: (() -> Unit)? = null) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(LibraryDimens.SortHeight)
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(start = LibraryDimens.Side, end = LibraryDimens.Side)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f).clickable(onClick = onSortClick)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.merge(LibraryType.Sort),
+                color = MaterialTheme.colorScheme.secondary,
+                maxLines = 1
+            )
+            Icon(
+                imageVector = SpectroIcons.ChevronDown,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(LibraryDimens.SortArrow)
+            )
+        }
+
+        // Marks several songs, only for the list of songs
+        if (onSelectClick != null) {
+            Icon(
+                imageVector = SpectroIcons.Checklist,
+                contentDescription = stringResource(R.string.collection_select),
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier
+                    .padding(end = LibraryDimens.Side)
+                    .size(LibraryDimens.ViewIcon)
+                    .clickable(onClick = onSelectClick)
+            )
+        }
+
+        if (showViewToggle) {
+            Icon(
+                imageVector = if (isGrid) SpectroIcons.ViewList else SpectroIcons.GridView,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier
+                    .size(LibraryDimens.ViewIcon)
+                    .clickable(onClick = onViewClick)
+            )
+        }
+    }
+}
+
+// The base the digits of a count are read in
+private const val DecimalRadix = 10
+
+// How many items a playlist or an album says it has, the first number of its count, in the digits of any language, none when it tells no number
+private fun itemCountOf(item: HomeItem): Int? =
+    item.countText.orEmpty().dropWhile { Character.digit(it, DecimalRadix) < 0 }
+        .takeWhile { Character.digit(it, DecimalRadix) >= 0 }
+        .fold(null as Int?) { total, digit -> (total ?: 0) * DecimalRadix + Character.digit(digit, DecimalRadix) }
+
+// An item of the list as a row, the cover on the left, round for an artist, its name and the line under it, and the three dots
+// While songs are being marked a box comes first and the three dots leave, none means the list is not in that mode
+@Composable
+internal fun LibraryRow(item: HomeItem, onClick: () -> Unit, onMenu: () -> Unit, isSelected: Boolean? = null, menuIcon: ImageVector = SpectroIcons.MoreVertical) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(LibraryDimens.RowHeight)
+            .clickable(onClick = onClick)
+            .padding(start = LibraryDimens.Side)
+    ) {
+        if (isSelected != null) Checkbox(checked = isSelected, onCheckedChange = null, modifier = Modifier.padding(end = LibraryDimens.RowGap))
+
+        Cover(item = item, modifier = Modifier.size(LibraryDimens.RowCover))
+
+        Column(modifier = Modifier.weight(1f).padding(horizontal = LibraryDimens.RowGap)) {
+            Text(
+                text = item.title,
+                style = MaterialTheme.typography.bodyLarge.merge(LibraryType.ItemTitle),
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                lineOf(item)?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium.merge(LibraryType.ItemLine),
+                        color = MaterialTheme.colorScheme.secondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+        }
+
+        if (isSelected == null) {
+            // A fuller icon than the three dots, so it gets room from the edge as they have
+            IconButton(onClick = onMenu, modifier = if (menuIcon == SpectroIcons.MoreVertical) Modifier else Modifier.padding(end = SpectroTheme.dimens.spaceLarge)) {
+                Icon(
+                    imageVector = menuIcon,
+                    contentDescription = stringResource(R.string.cd_more),
+                    tint = MaterialTheme.colorScheme.onBackground
+                )
+            }
+        }
+    }
+}
+
+// An item of the list as a cover with its name and the line under it, an artist is round with the words in the middle, a mark shows on it while songs are marked
+@Composable
+private fun LibraryCover(item: HomeItem, isSelected: Boolean?, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val isArtist = item.kind == HomeItemKind.Artist
+
+    Column(
+        horizontalAlignment = if (isArtist) Alignment.CenterHorizontally else Alignment.Start,
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick)
+    ) {
+        Box {
+            Cover(item = item, modifier = Modifier.fillMaxWidth().aspectRatio(1f), pixels = LibraryDimens.GridCoverPixels)
+
+            // The mark comes in with a little growth and goes out the same way, in a circle so it shows over any cover
+            val markProgress by animateFloatAsState(
+                targetValue = if (isSelected != null) 1f else 0f,
+                animationSpec = tween(SpectroMotion.ExpandMillis),
+                label = "CoverMark"
+            )
+            if (markProgress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(LibraryDimens.GridMarkPadding)
+                        .graphicsLayer {
+                            alpha = markProgress
+                            scaleX = markProgress
+                            scaleY = markProgress
+                        }
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                ) {
+                    Checkbox(checked = isSelected == true, onCheckedChange = null)
+                }
+            }
+        }
+
+        Text(
+            text = item.title,
+            style = MaterialTheme.typography.bodyLarge.merge(LibraryType.ItemTitle),
+            color = MaterialTheme.colorScheme.onBackground,
+            textAlign = if (isArtist) TextAlign.Center else TextAlign.Start,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = LibraryDimens.GridTextTop)
+        )
+        lineOf(item)?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium.merge(LibraryType.ItemLine),
+                color = MaterialTheme.colorScheme.secondary,
+                textAlign = if (isArtist) TextAlign.Center else TextAlign.Start,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+// The picture of an item, round for an artist, asked in the size the cover is drawn in when it is a big one so it is not a small picture stretched
+@Composable
+private fun Cover(item: HomeItem, modifier: Modifier, pixels: Int? = null) {
+    val url = remember(item.thumbnailUrl, pixels) { if (pixels == null) item.thumbnailUrl else item.thumbnailUrl?.resize(pixels, pixels) }
+
+    AsyncImage(
+        model = url,
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = modifier
+            .clip(if (item.kind == HomeItemKind.Artist) CircleShape else RoundedCornerShape(LibraryDimens.RowCoverCorner))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+    )
+}
+
+// The line under the name as YouTube Music writes it
+private fun lineOf(item: HomeItem): String? = item.lineText ?: item.countText
+
+// A playlist the account made names the account in the line under it
+private fun isOwned(item: HomeItem, profileName: String?): Boolean =
+    item.kind == HomeItemKind.Playlist && !profileName.isNullOrBlank() &&
+        (item.author == profileName || lineOf(item)?.contains(profileName) == true)
+
+// The room of the rows while the list is asked, a cover and two lines in the places of the real ones
+@Composable
+internal fun RowsSkeleton(modifier: Modifier = Modifier) {
+    SkeletonHost(modifier = modifier.fillMaxWidth()) {
+        repeat(LibraryDimens.SkeletonRows) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(LibraryDimens.RowHeight)
+                    .padding(horizontal = LibraryDimens.Side)
+            ) {
+                Box(modifier = Modifier.size(LibraryDimens.RowCover).skeleton(RoundedCornerShape(LibraryDimens.RowCoverCorner)))
+                Column(modifier = Modifier.weight(1f).padding(start = LibraryDimens.RowGap)) {
+                    Box(modifier = Modifier.fillMaxWidth(SkeletonTitleFraction).height(LibraryDimens.GridTextTop * 2).skeleton(MaterialTheme.shapes.extraSmall))
+                    Spacer(modifier = Modifier.height(LibraryDimens.GridTextTop))
+                    Box(modifier = Modifier.fillMaxWidth(SkeletonLineFraction).height(LibraryDimens.GridTextTop * 2).skeleton(MaterialTheme.shapes.extraSmall))
+                }
+            }
+        }
+    }
+}
+
+// How much of the width the lines of the placeholder take
+private const val SkeletonTitleFraction = 0.7f
+private const val SkeletonLineFraction = 0.4f
+
+// What shows when a list has nothing, an icon, what will appear there and the button that goes to look for music
+@Composable
+internal fun EmptyList(icon: ImageVector, text: String, onFindMusic: (() -> Unit)?, modifier: Modifier = Modifier) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier.fillMaxWidth().padding(horizontal = LibraryDimens.Side)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.size(LibraryDimens.EmptyIcon)
+        )
+        Text(
+            text = text,
+            style = MaterialTheme.typography.bodyLarge.merge(LibraryType.Empty),
+            color = MaterialTheme.colorScheme.secondary,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(vertical = LibraryDimens.EmptyGap)
+        )
+        if (onFindMusic != null) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .height(LibraryDimens.EmptyButtonHeight)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.onBackground)
+                    .clickable(onClick = onFindMusic)
+                    .padding(horizontal = LibraryDimens.EmptyButtonPaddingX)
+            ) {
+                Text(
+                    text = stringResource(R.string.library_find_music),
+                    style = MaterialTheme.typography.bodyLarge.merge(LibraryType.Action),
+                    color = MaterialTheme.colorScheme.background
+                )
+            }
+        }
+
+    }
+}
+
+// The button that makes something new, white, with a plus before its words, which only stands in its place for now
+@Composable
+private fun NewButton(text: String, isWide: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    // Round with only the plus when it is not wide, so the room around the plus follows the words going in and out
+    val sidePadding by animateDpAsState(
+        targetValue = if (isWide) LibraryDimens.ActionPaddingX else (LibraryDimens.ActionHeight - LibraryDimens.ActionIcon) / 2,
+        animationSpec = tween(LibraryDimens.ActionMillis),
+        label = "NewButtonPadding"
+    )
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .height(LibraryDimens.ActionHeight)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onBackground)
+            .clickable(onClick = onClick)
+            .padding(horizontal = sidePadding)
+    ) {
+        Icon(
+            imageVector = SpectroIcons.Add,
+            contentDescription = text,
+            tint = MaterialTheme.colorScheme.background,
+            modifier = Modifier.size(LibraryDimens.ActionIcon)
+        )
+        AnimatedVisibility(
+            visible = isWide,
+            enter = expandHorizontally(tween(LibraryDimens.ActionMillis)) + fadeIn(tween(LibraryDimens.ActionMillis)),
+            exit = shrinkHorizontally(tween(LibraryDimens.ActionMillis)) + fadeOut(tween(LibraryDimens.ActionMillis))
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.bodyLarge.merge(LibraryType.Action),
+                color = MaterialTheme.colorScheme.background,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.padding(start = LibraryDimens.ActionIconGap)
+            )
+        }
+    }
+}
+
+// How far a drag counts to change the button that makes something new
+private const val ActionScrollThreshold = 4f
+
+// The icon and the words of an empty list, by the list
+private fun emptyIconOf(source: LibrarySource): ImageVector = when (source) {
+    LibrarySource.Albums -> SpectroIcons.Album
+    LibrarySource.Artists, LibrarySource.Subscriptions, LibrarySource.Channels -> SpectroIcons.Person
+    LibrarySource.Podcasts -> SpectroIcons.Podcasts
+    else -> SpectroIcons.MusicNote
+}
+
+private fun emptyTextOf(source: LibrarySource): Int = when (source) {
+    LibrarySource.Songs -> R.string.library_empty_songs
+    LibrarySource.Albums -> R.string.library_empty_albums
+    LibrarySource.Artists -> R.string.library_empty_artists
+    LibrarySource.Subscriptions -> R.string.library_empty_subscriptions
+    LibrarySource.Playlists -> R.string.library_empty_playlists
+    LibrarySource.Podcasts -> R.string.library_empty_podcasts
+    LibrarySource.Channels -> R.string.library_empty_channels
+    LibrarySource.Recent -> R.string.library_empty_recent
+}
+
+// Milliseconds in a second, to give a row the length of its song
+private const val MillisPerSecond = 1000L

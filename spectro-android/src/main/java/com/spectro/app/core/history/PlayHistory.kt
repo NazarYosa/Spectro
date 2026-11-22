@@ -1,0 +1,292 @@
+﻿package com.spectro.app.core.history
+
+// Android context
+import android.content.Context
+// Room
+import com.spectro.app.core.playback.RemoteArtworkKey
+import androidx.room.Room
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
+// Media3 item
+import androidx.media3.common.MediaItem
+// Reactive flows
+import kotlinx.coroutines.flow.Flow
+
+// File of the history on the device
+private const val DatabaseName = "history.db"
+
+// Milliseconds in a day, for the period of the most listened songs
+private const val MillisPerDay = 86_400_000L
+
+// A pause longer than this ends a session of listening, and how many of the latest listenings are looked at to find where it began
+private const val SessionGapMs = 30 * 60 * 1000L
+private const val SessionScan = 500
+
+// A song is forgotten when what it is listened to now is under this share of what it was listened to before
+private const val ForgottenShare = 0.2
+
+// A song counts as listened to after it plays this long with sound, so a song skipped at once stays out of the history
+const val MinimumListenMillis = 3_000L
+
+// What the user listened to, written by the playback service and read by the screens
+object PlayHistory {
+    @Volatile
+    private var database: HistoryDatabase? = null
+
+    // Version 2 added the pinned songs, what was listened to stays as it was
+    private val addPinnedSongs = object : Migration(1, 2) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS pinned_song (id TEXT NOT NULL, title TEXT NOT NULL, artist TEXT, artworkUrl TEXT, " +
+                    "durationMs INTEGER NOT NULL, pinnedAt INTEGER NOT NULL, PRIMARY KEY(id))"
+            )
+        }
+    }
+
+    // Version 3 added the lyrics picked by hand
+    private val addChosenLyrics = object : Migration(2, 3) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS chosen_lyrics (videoId TEXT NOT NULL, json TEXT NOT NULL, chosenAt INTEGER NOT NULL, PRIMARY KEY(videoId))")
+        }
+    }
+
+    // Version 4 added the searches
+    private val addSearches = object : Migration(3, 4) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS search_history (`query` TEXT NOT NULL, searchedAt INTEGER NOT NULL, PRIMARY KEY(`query`))")
+        }
+    }
+
+    // Version 6 added the kind of what is pinned, so a podcast can be pinned as a song is, the ones pinned before are songs
+    private val addPinnedKind = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE pinned_song ADD COLUMN kind TEXT NOT NULL DEFAULT 'Song'")
+        }
+    }
+
+    // Version 7 marked the songs whose time is a guess, the ones kept before were all listened to here
+    private val addEstimatedTime = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE song ADD COLUMN isEstimated INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    // Version 10 marked the plays that are part of a loop and gave each release its year
+    private val addLoopsAndReleaseYear = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE event ADD COLUMN isLoop INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE `release` ADD COLUMN releaseYear INTEGER")
+        }
+    }
+
+    // Version 9 added the year of the album of each song and the mark of the songs taken out of the retrospective
+    private val addYearAndExclusion = object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE song ADD COLUMN releaseYear INTEGER")
+            db.execSQL("ALTER TABLE song ADD COLUMN isExcluded INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    // Version 8 added the album and the genres of each song, looked for after it was listened to
+    private val addSongDetails = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE song ADD COLUMN albumId TEXT")
+            db.execSQL("ALTER TABLE song ADD COLUMN albumName TEXT")
+            db.execSQL("ALTER TABLE song ADD COLUMN genres TEXT")
+            db.execSQL("ALTER TABLE song ADD COLUMN detailsAt INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    // Version 5 added the releases of the artists the user follows
+    private val addReleases = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `release` (id TEXT NOT NULL, artistId TEXT NOT NULL, artistName TEXT NOT NULL, artistPhoto TEXT, " +
+                    "title TEXT NOT NULL, coverUrl TEXT, kind TEXT, seenAt INTEGER NOT NULL, isAnnounced INTEGER NOT NULL, isRead INTEGER NOT NULL, PRIMARY KEY(id))"
+            )
+            db.execSQL("CREATE TABLE IF NOT EXISTS scanned_artist (id TEXT NOT NULL, scannedAt INTEGER NOT NULL, PRIMARY KEY(id))")
+        }
+    }
+
+    // The database, opened the first time it is needed
+    internal fun dao(context: Context): HistoryDao =
+        (database ?: synchronized(this) {
+            database ?: Room.databaseBuilder(context.applicationContext, HistoryDatabase::class.java, DatabaseName)
+                .addMigrations(addPinnedSongs, addChosenLyrics, addSearches, addReleases, addPinnedKind, addEstimatedTime, addSongDetails, addYearAndExclusion, addLoopsAndReleaseYear)
+                .build()
+                .also { database = it }
+        }).dao()
+
+    fun checkpoint(context: Context) {
+        runCatching {
+            database?.openHelper?.writableDatabase?.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
+        }
+    }
+
+    // Writes a listening of a song, empty details are never written, a song without a title cannot be shown
+    suspend fun record(context: Context, item: MediaItem, playTimeMs: Long) {
+        val metadata = item.mediaMetadata
+        val title = metadata.title?.toString()?.takeIf { it.isNotBlank() } ?: return
+
+        dao(context).record(
+            song = SongEntity(
+                id = item.mediaId,
+                title = title,
+                artist = metadata.artist?.toString(),
+                artworkUrl = metadata.extras?.getString(RemoteArtworkKey) ?: metadata.artworkUri?.toString(),
+                durationMs = metadata.durationMs ?: 0L,
+                totalPlayTimeMs = 0L,
+                lastPlayedAt = 0L
+            ),
+            playTimeMs = playTimeMs,
+            at = System.currentTimeMillis()
+        )
+    }
+
+    // Adds the time a song kept playing after it was counted, to its total and to its last listening
+    suspend fun addTime(context: Context, songId: String, playTimeMs: Long) {
+        dao(context).addTime(songId, playTimeMs)
+    }
+
+    // Keeps a search to be offered again
+    suspend fun saveSearch(context: Context, query: String) {
+        dao(context).saveSearch(SearchEntity(query, System.currentTimeMillis()))
+    }
+
+    suspend fun removeSearch(context: Context, query: String) {
+        dao(context).removeSearch(query)
+    }
+
+    suspend fun clearSearches(context: Context) {
+        dao(context).clearSearches()
+    }
+
+    // Puts the searches of the account in place of the ones of the device, the first one the most recent
+    suspend fun replaceSearches(context: Context, queries: List<String>) {
+        val now = System.currentTimeMillis()
+        dao(context).replaceSearches(queries.mapIndexed { index, query -> SearchEntity(query, now - index) })
+    }
+
+    // Keeps what the page of an artist lists, the new ones among them become news
+    suspend fun saveReleases(context: Context, artistId: String, releases: List<ReleaseEntity>, scannedAt: Long): List<ReleaseEntity> =
+        dao(context).addReleases(artistId, releases, scannedAt)
+
+    // What the profile shows of a period, from the moment it starts until now
+    suspend fun listenStats(context: Context, since: Long): ListenStats = dao(context).listenStats(since)
+
+    // Where the last session of listening began, a session goes on while the pauses between the songs are short, empty when nothing was listened to yet
+    suspend fun lastSessionStart(context: Context): Long? {
+        val listens = dao(context).recentListens(SessionScan)
+        var start = listens.firstOrNull()?.timestamp ?: return null
+        for (listen in listens.drop(1)) {
+            if (start - (listen.timestamp + listen.playTimeMs) > SessionGapMs) break
+            start = listen.timestamp
+        }
+        return start
+    }
+
+    suspend fun topSongs(context: Context, since: Long, until: Long, limit: Int): List<TopSong> = dao(context).topSongs(since, until, limit)
+
+    suspend fun artistTotals(context: Context, since: Long, until: Long): List<ArtistTotal> = dao(context).artistTotals(since, until)
+
+    // What the retrospective reads, which leaves out the songs taken out of it and the ones longer than the limit
+    suspend fun listensBetween(context: Context, since: Long, until: Long, maxDurationMs: Long, keepLoops: Boolean): List<ListenTime> = dao(context).listensBetween(since, until, maxDurationMs, keepLoops)
+
+    suspend fun recapSongs(context: Context, since: Long, until: Long, maxDurationMs: Long, keepLoops: Boolean, limit: Int): List<TopSong> = dao(context).recapSongs(since, until, maxDurationMs, keepLoops, limit)
+
+    suspend fun recapArtists(context: Context, since: Long, until: Long, maxDurationMs: Long, keepLoops: Boolean): List<ArtistTotal> = dao(context).recapArtists(since, until, maxDurationMs, keepLoops)
+
+    // The releases of a year by artists the user follows that were never listened to
+    suspend fun missedReleases(context: Context, year: Int, limit: Int): List<ReleaseEntity> = dao(context).missedReleases(year, limit)
+
+    // Takes a song out of the retrospective, or puts it back
+    suspend fun setExcluded(context: Context, songId: String, isExcluded: Boolean) = dao(context).setExcluded(songId, isExcluded)
+
+    suspend fun firstListenAt(context: Context): Long? = dao(context).firstListenAt()
+
+    suspend fun songListensBetween(context: Context, since: Long, until: Long, maxDurationMs: Long, keepLoops: Boolean): List<SongListen> = dao(context).songListensBetween(since, until, maxDurationMs, keepLoops)
+
+    suspend fun artistListensBetween(context: Context, since: Long, until: Long, maxDurationMs: Long, keepLoops: Boolean): List<ArtistListen> = dao(context).artistListensBetween(since, until, maxDurationMs, keepLoops)
+
+    // The artists listened to the most and the artists followed, as names, for the suggestions of the search
+    suspend fun topArtistTexts(context: Context, limit: Int): List<String> = dao(context).topArtistTexts(limit)
+
+    suspend fun followedArtistNames(context: Context): List<String> = dao(context).followedArtistNames()
+
+    // The news about the artists the user follows, the newest first, and how many were not read
+    fun announcedReleases(context: Context): Flow<List<ReleaseEntity>> = dao(context).announcedReleases()
+
+    fun unreadReleases(context: Context): Flow<Int> = dao(context).unreadReleases()
+
+    suspend fun markReleasesRead(context: Context) {
+        dao(context).markReleasesRead()
+    }
+
+    suspend fun dismissRelease(context: Context, id: String) {
+        dao(context).dismissRelease(id)
+    }
+
+    // The last searches, the most recent first, updated whenever they change
+    fun searches(context: Context, limit: Int): Flow<List<String>> = dao(context).searches(limit)
+
+    // The lyrics the user picked by hand for a video, as the text that was saved, empty when none was picked
+    suspend fun chosenLyrics(context: Context, videoId: String): String? = dao(context).chosenLyrics(videoId)
+
+    suspend fun saveChosenLyrics(context: Context, videoId: String, json: String) {
+        dao(context).saveChosenLyrics(ChosenLyricsEntity(videoId, json, System.currentTimeMillis()))
+    }
+
+    suspend fun deleteChosenLyrics(context: Context, videoId: String) {
+        dao(context).deleteChosenLyrics(videoId)
+    }
+
+    // Pins a song or a podcast to the speed dial of the Home
+    suspend fun pin(context: Context, id: String, title: String, artist: String?, artworkUrl: String?, durationMs: Long, kind: String = "Song") {
+        dao(context).pin(PinnedEntity(id, title, artist, artworkUrl, durationMs, System.currentTimeMillis(), kind))
+    }
+
+    suspend fun unpin(context: Context, id: String) {
+        dao(context).unpin(id)
+    }
+
+    suspend fun isPinned(context: Context, id: String): Boolean =
+        dao(context).isPinned(id) > 0
+
+    suspend fun pinnedOnce(context: Context): List<PinnedEntity> =
+        dao(context).pinnedOnce()
+
+    suspend fun recentOnce(context: Context, limit: Int = 100): List<SongEntity> =
+        dao(context).recentSongsOnce(limit)
+
+    // The pinned songs, the last one pinned first, updated whenever they change
+    fun pinned(context: Context): Flow<List<PinnedEntity>> = dao(context).pinnedSongs()
+
+    // Everything that was listened to, the most recent first, updated whenever the history changes
+    fun all(context: Context): Flow<List<SongEntity>> = dao(context).allSongs()
+
+    // When each song was last played, and the songs of the history of the account that are not here yet
+    suspend fun playedTimes(context: Context): List<PlayedTime> = dao(context).playedTimes()
+
+    suspend fun addFound(context: Context, songs: List<SongEntity>) {
+        dao(context).addFound(songs)
+    }
+
+    suspend fun removeFromHistory(context: Context, id: String) {
+        dao(context).deleteSong(id)
+    }
+
+    suspend fun clearHistory(context: Context) {
+        dao(context).clearSongs()
+    }
+
+    // The songs listened to, the most recent first, updated whenever the history changes
+    fun recent(context: Context, limit: Int): Flow<List<SongEntity>> = dao(context).recentSongs(limit)
+
+    // The songs that were listened to a lot before the last days and much less since, updated whenever the history changes
+    fun forgotten(context: Context, days: Int, limit: Int): Flow<List<SongEntity>> =
+        dao(context).forgottenFavorites(System.currentTimeMillis() - days * MillisPerDay, ForgottenShare, limit)
+
+    // The songs listened to the longest in the last days, the most listened first, updated whenever the history changes
+    fun mostPlayed(context: Context, days: Int, limit: Int): Flow<List<SongEntity>> =
+        dao(context).mostPlayedSongs(System.currentTimeMillis() - days * MillisPerDay, limit)
+}

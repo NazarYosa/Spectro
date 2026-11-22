@@ -1,0 +1,93 @@
+﻿package com.spectro.app.core.innertube
+
+// Network and security utilities
+import com.spectro.app.features.settings.data.ContentCountries
+import com.spectro.app.features.settings.data.ContentPrefs
+import java.security.MessageDigest
+import java.util.Locale
+
+// YouTube Music and the web client every request to it pretends to be
+const val MusicOrigin = "https://music.youtube.com"
+const val MusicApi = "$MusicOrigin/youtubei/v1"
+const val ClientName = "WEB_REMIX"
+const val ClientVersion = "1.20260707.12.00"
+const val ClientId = "67"
+const val WebUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0"
+
+// The Android app of YouTube Music, asked only for what the web player is never given, such as the comments of an album
+const val AppClientName = "ANDROID_MUSIC"
+const val AppClientVersion = "8.47.54"
+const val AppClientId = "21"
+const val AppUserAgent = "com.google.android.apps.youtube.music/$AppClientVersion (Linux; U; Android 15) gzip"
+
+// Language and country used when the device does not tell them
+private const val FallbackLanguage = "en"
+private const val FallbackCountry = "US"
+
+// How many milliseconds make a second
+private const val MillisPerSecond = 1000L
+
+// Languages with a region or a script that YouTube Music accepts, any other pair is refused with an error
+private val AcceptedLanguageTags = setOf(
+    "pt-BR", "pt-PT", "en-GB", "en-US", "es-419", "es-US", "fr-CA", "zh-CN", "zh-TW", "zh-HK", "zh-Hans", "zh-Hant", "sr-Latn"
+)
+
+// Languages of the app that YouTube Music does not know, with the closest one it does
+private val ReplacedLanguages = mapOf("nn" to "no", "haw" to "en")
+
+// Language and country the answers of YouTube Music come in, the tag is the language with the region or script when YouTube accepts it
+data class YouTubeLocale(val language: String, val country: String, val tag: String = language) {
+    // Language as YouTube asks for it
+    val hl: String get() = tag
+
+    // Header that lists the language first and the plain language as a second choice
+    val acceptLanguage: String get() = if (tag == language) language else "$tag,$language;q=0.9"
+}
+
+// Everything that tells YouTube who is asking, the cookies are empty for a guest
+data class YouTubeSession(
+    val cookies: String?,
+    val visitorData: String?,
+    val locale: YouTubeLocale
+)
+
+// Language of the device and the country the user chose for the content, the country of the device when none was chosen
+fun deviceLocale(): YouTubeLocale {
+    val device = Locale.getDefault()
+    val language = device.language.ifEmpty { FallbackLanguage }.let { ReplacedLanguages[it] ?: it }
+    val tag = listOf(device.script, device.country)
+        .filter { it.isNotEmpty() }
+        .map { "$language-$it" }
+        .firstOrNull { it in AcceptedLanguageTags } ?: language
+
+    return YouTubeLocale(
+        language = language,
+        country = ContentPrefs.country ?: device.country.takeIf { it in ContentCountries } ?: FallbackCountry,
+        tag = tag
+    )
+}
+
+// Signature that the requests of the signed in web player carry, made from the session cookie
+fun signatureFor(cookies: String): String? {
+    val sapisid = cookieValue(cookies, "SAPISID") ?: cookieValue(cookies, "__Secure-3PAPISID") ?: return null
+    val timestamp = System.currentTimeMillis() / MillisPerSecond
+    val digest = MessageDigest.getInstance("SHA-1").digest("$timestamp $sapisid $MusicOrigin".toByteArray())
+
+    return "${timestamp}_${digest.joinToString("") { "%02x".format(it) }}"
+}
+
+// Value of one cookie in a cookie header
+fun cookieValue(cookies: String, key: String): String? =
+    Regex("(?:^|;\\s*)$key=([^;]+)").find(cookies)?.groupValues?.get(1)
+
+// Cookie header with the language and the country of the request, so the account preferences do not win over them
+fun cookiesWithLocale(cookies: String?, locale: YouTubeLocale): String {
+    val parts = cookies.orEmpty().split(";").map { it.trim() }.filter { it.isNotEmpty() }
+    val others = parts.filterNot { it.startsWith("PREF=", ignoreCase = true) }
+    val kept = parts.filter { it.startsWith("PREF=", ignoreCase = true) }
+        .flatMap { it.substringAfter("=").split("&") }
+        .filterNot { it.startsWith("hl=") || it.startsWith("gl=") }
+    val preferences = listOf("hl=${locale.hl}", "gl=${locale.country}") + kept
+
+    return (others + "PREF=${preferences.joinToString("&")}").joinToString("; ")
+}

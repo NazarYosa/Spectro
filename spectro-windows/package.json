@@ -1,0 +1,54 @@
+{
+  "name": "spectro",
+  "productName": "Spectro",
+  "version": "1.0.0",
+  "description": "Spectro Music Desktop Player",
+  "main": "main.js",
+  "author": "Nazar Yosa",
+  "license": "GPL-3.0",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.spectro.desktop",
+    "productName": "Spectro",
+    "win": {
+      "icon": "dist/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Spectro",
+      "artifactName": "Spectro-Setup.${ext}"
+    },
+    "portable": {
+      "artifactName": "Spectro.${ext}"
+    },
+    "directories": {
+      "output": "release-build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "dist/**/*"
+    ]
+  }
+}

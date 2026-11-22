@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Spectro</title>
+  <link rel="icon" type="image/png" href="logo.png">
+  <link rel="shortcut icon" href="icon.ico">
+  <link rel="stylesheet" href="style.css?v=1.1.4">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Top Window Titlebar -->
+    <header class="app-titlebar">
+      <div class="titlebar-left" data-tauri-drag-region>
+        <img src="logo.png" alt="Spectro" class="titlebar-logo" data-tauri-drag-region>
+        <span class="titlebar-title" data-tauri-drag-region>Spectro</span>
+      </div>
+      <div class="titlebar-center">
+        <button id="nav-back-btn" class="nav-arrow-btn" title="Back">
+          <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+        </button>
+        <button id="nav-forward-btn" class="nav-arrow-btn" title="Forward">
+          <svg viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></svg>
+        </button>
+        <div class="top-search-box" data-tauri-drag-region="false">
+          <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+          <input type="text" id="global-search-input" data-i18n-ph="nav_search_placeholder" placeholder="Cari lagu, artis, atau album..." autocomplete="off">
+        </div>
+      </div>
+      <div class="titlebar-drag-spacer" data-tauri-drag-region style="flex: 1; height: 100%; min-width: 30px;"></div>
+      <div class="titlebar-right">
+        <!-- If logged out -->
+        <button id="btn-login" class="login-btn" data-tauri-drag-region="false">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+          <span data-i18n="login_button">Masuk</span>
+        </button>
+
+        <!-- If logged in -->
+        <div id="user-badge" class="user-badge hidden" title="Profil Pengguna (Klik untuk opsi)" data-tauri-drag-region="false">
+          <img id="user-avatar-img" class="user-avatar-img hidden" src="" alt="Avatar">
+          <span id="user-avatar-initial" class="user-avatar">NY</span>
+          <span id="user-name" class="user-name">Pengguna</span>
+        </div>
+
+        <!-- Window Controls (Minimize, Maximize, Close) -->
+        <div class="window-controls" data-tauri-drag-region="false" style="position: relative; z-index: 999999; -webkit-app-region: no-drag !important; pointer-events: auto !important;">
+          <button id="win-btn-minimize" class="win-control-btn" title="Minimalkan" data-tauri-drag-region="false" style="-webkit-app-region: no-drag !important; pointer-events: auto !important;">
+            <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+          </button>
+          <button id="win-btn-maximize" class="win-control-btn" title="Maksimalkan / Pulihkan" data-tauri-drag-region="false" style="-webkit-app-region: no-drag !important; pointer-events: auto !important;">
+            <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm0 16H5V5h14v14z"/></svg>
+          </button>
+          <button id="win-btn-close" class="win-control-btn win-control-close" title="Tutup" data-tauri-drag-region="false" style="-webkit-app-region: no-drag !important; pointer-events: auto !important;">
+            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- App Body: 3-Column Layout -->
+    <div class="app-body">
+      <!-- Left Sidebar (Navigation & Library, Collapsible Spotify-style) -->
+      <aside class="sidebar-left" id="sidebar-left">
+        <div class="sidebar-top-bar">
+          <button id="btn-toggle-sidebar" class="sidebar-toggle-btn" title="Ciutkan / Lebarkan Menu (Spotify Mode)">
+            <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
+          </button>
+        </div>
+
+        <div class="nav-group">
+          <button class="nav-item active" data-page="home" title="Beranda">
+            <svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+            <span data-i18n="nav_home">Beranda</span>
+          </button>
+          <button class="nav-item" data-page="explore" title="Jelajahi">
+            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+            <span data-i18n="nav_explore">Jelajahi</span>
+          </button>
+          <button class="nav-item" data-page="radios" title="Radio Online">
+            <svg viewBox="0 0 24 24"><path d="M3.24 6.15C2.51 6.43 2 7.17 2 8v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-.83-.51-1.57-1.24-1.85L12 2.5 3.24 6.15zM12 4.5l6.5 2.71v.79H5.5v-.79L12 4.5zM20 20H4V10h16v10zm-8-2c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4z"/></svg>
+            <span data-i18n="nav_radios">Radio Online</span>
+          </button>
+          <button class="nav-item" data-page="settings" id="nav-btn-settings" title="Pengaturan">
+            <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+            <span data-i18n="nav_settings">Pengaturan</span>
+          </button>
+        </div>
+
+        <div class="sidebar-divider"></div>
+
+        <div class="library-header">
+          <div class="library-title">
+            <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+            <span data-i18n="nav_library">Koleksi Kamu</span>
+          </div>
+        </div>
+
+        <div class="library-list" id="library-list">
+          <div class="playlist-item" data-id="liked" title="Lagu Disukai">
+            <div class="playlist-icon heart-gradient">
+              <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+            </div>
+            <div class="playlist-info">
+              <span class="playlist-name" data-i18n="nav_liked_songs">Lagu Disukai</span>
+              <span class="playlist-meta" id="liked-count-meta">Daftar Putar</span>
+            </div>
+          </div>
+          <div id="user-custom-playlists"></div>
+        </div>
+      </aside>
+
+      <!-- Center Main Content Canvas -->
+      <main class="main-canvas" id="main-canvas">
+        <!-- Dynamic Page Container (Browse/Search/Explore) -->
+        <div id="page-content" class="page-content">
+          <!-- Rendered via JavaScript -->
+        </div>
+
+        <!-- Dedicated Music Player + Synced Lyrics View -->
+        <div id="music-player-view" class="music-player-view hidden">
+          <div class="player-view-header">
+            <button id="btn-back-to-browse" class="btn-back-browse" title="Kembali ke Penjelajahan">
+              <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+              <span>Jelajah Musik</span>
+            </button>
+            <div class="player-view-tag">Sedang Diputar</div>
+          </div>
+
+          <div class="player-view-body">
+            <!-- Full Width Lyrics View (Focus on Lyrics with Large Typography) -->
+            <div class="player-view-lyrics">
+              <div class="lyrics-card-header">
+                <div class="lyrics-source-pill" id="lyrics-source-pill" title="Pilih sumber lirik yang tersedia untuk lagu ini">
+                  <svg class="lyrics-pill-icon" viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+                  <select id="select-track-lyrics-source" class="lyrics-source-select-sleek" title="Pilih sumber lirik">
+                    <option value="">Memuat sumber...</option>
+                  </select>
+                  <svg class="lyrics-pill-arrow" viewBox="0 0 24 24" width="12" height="12"><path fill="currentColor" d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+                </div>
+              </div>
+              <div class="lyrics-scroll-container" id="lyrics-container">
+                <p class="lyrics-placeholder">Lirik lagu akan tampil di sini saat diputar.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- Right Sidebar (Dedicated Queue Panel, Closed/Hidden by default when not playing) -->
+      <aside class="sidebar-right hidden" id="sidebar-right">
+        <div class="queue-panel-header">
+          <div class="queue-title-row">
+            <svg viewBox="0 0 24 24" class="queue-header-icon"><path d="M19 9H2v2h17V9zm0-4H2v2h17V5zM2 15h13v-2H2v2zm15-2v6l5-3-5-3z"/></svg>
+            <h3 data-i18n="queue_title">Antrean Pemutaran</h3>
+          </div>
+          <span class="queue-count-badge" id="queue-count-badge">0 lagu</span>
+        </div>
+
+        <div class="queue-scroll-area">
+          <div class="queue-section-label" data-i18n="queue_now_playing">Sedang Diputar</div>
+          <div id="now-playing-queue-item" class="queue-item active-queue">
+            <img id="queue-active-art" src="logo.png" alt="Art">
+            <div class="queue-text">
+              <span id="queue-active-title" class="q-title" data-i18n="player_idle">Tidak ada lagu diputar</span>
+              <span id="queue-active-artist" class="q-artist">-</span>
+            </div>
+            <div class="queue-wave-anim hidden" id="queue-wave-anim">
+              <span></span><span></span><span></span>
+            </div>
+          </div>
+
+          <div class="queue-section-label mt-4" data-i18n="queue_up_next">Berikutnya</div>
+          <div id="queue-list" class="queue-list">
+            <div class="queue-empty-hint" data-i18n="queue_empty">Antrean lagu akan otomatis muncul saat lagu dimainkan.</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+
+    <!-- Bottom Persistent Player Bar -->
+    <footer class="bottom-player-bar">
+      <!-- Left: Track Details -->
+      <div class="player-left">
+        <img id="player-art" src="logo.png" alt="Artwork" class="player-cover-art">
+        <div class="player-meta">
+          <div id="player-title" class="player-title">Spectro Player</div>
+          <div id="player-artist" class="player-artist">Siap Memutar Musik</div>
+          <div id="device-sync-badge" class="device-sync-badge hidden">
+            <span class="sync-dot"></span>
+            <span id="device-sync-name">Memutar di: Android</span>
+          </div>
+        </div>
+        <button id="player-like-btn" class="player-action-btn" title="Sukai Lagu">
+          <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
+        </button>
+        <button id="player-playlist-btn" class="player-action-btn" title="Simpan ke Playlist">
+          <svg viewBox="0 0 24 24"><path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/></svg>
+        </button>
+      </div>
+
+      <!-- Center: Controls & Seekbar -->
+      <div class="player-center">
+        <div class="player-controls">
+          <button id="btn-shuffle" class="control-btn" title="Acak">
+            <svg viewBox="0 0 24 24"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+          </button>
+          <button id="btn-prev" class="control-btn" title="Sebelumnya">
+            <svg viewBox="0 0 24 24"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+          </button>
+          <button id="btn-play-pause" class="play-btn-circle" title="Putar">
+            <svg id="icon-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <svg id="icon-pause" class="hidden" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+          </button>
+          <button id="btn-next" class="control-btn" title="Berikutnya">
+            <svg viewBox="0 0 24 24"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+          </button>
+          <button id="btn-repeat" class="control-btn" title="Ulangi">
+            <svg viewBox="0 0 24 24"><path d="M7 7h10v3l4-4-4-4v3H5v6h2V7zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2v4z"/></svg>
+          </button>
+        </div>
+
+        <div class="player-seekbar-row">
+          <span id="time-current" class="time-label">0:00</span>
+          <div class="seekbar-bar-container" id="seekbar-container">
+            <div class="seekbar-bg"></div>
+            <div class="seekbar-progress" id="seekbar-progress"></div>
+            <div class="seekbar-thumb" id="seekbar-thumb"></div>
+          </div>
+          <span id="time-total" class="time-label">0:00</span>
+        </div>
+      </div>
+
+      <!-- Right: Extra Actions & Volume Slider -->
+      <div class="player-right">
+        <button id="btn-toggle-equalizer" class="side-btn" title="Equalizer & Efek Suara">
+          <svg viewBox="0 0 24 24"><path d="M10 20h4V4h-4v16zm-6 0h4v-8H4v8zM16 9v11h4V9h-4z"/></svg>
+        </button>
+        <button id="btn-toggle-player-view" class="side-btn" title="Buka / Tutup Tampilan Lirik">
+          <svg viewBox="0 0 24 24"><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/></svg>
+        </button>
+        <button id="btn-toggle-queue" class="side-btn" title="Tampilkan / Sembunyikan Panel Antrean">
+          <svg viewBox="0 0 24 24"><path d="M19 9H2v2h17V9zm0-4H2v2h17V5zM2 15h13v-2H2v2zm15-2v6l5-3-5-3z"/></svg>
+        </button>
+        <div class="volume-container">
+          <button id="btn-volume" class="side-btn" title="Mute/Unmute">
+            <svg id="icon-vol-high" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+          </button>
+          <div class="volume-slider-wrap" id="volume-container">
+            <div class="volume-bar-bg"></div>
+            <div class="volume-bar-progress" id="volume-progress"></div>
+            <div class="volume-thumb" id="volume-thumb"></div>
+          </div>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Audio Element (Local/Direct Fallback) -->
+  <audio id="audio-engine" preload="auto"></audio>
+
+  <!-- YouTube IFrame Engine Host (Kept active in viewport with 240x240 size so Chromium & YouTube never throttle) -->
+  <div id="yt-player-host" style="position:fixed; bottom:0; right:0; width:240px; height:240px; opacity:0.001; pointer-events:none; z-index:-1; overflow:hidden;">
+    <div id="yt-player"></div>
+  </div>
+
+  <!-- Login Dialog Modal (Spectro Sync: Android to Windows Pairing) -->
+  <div id="login-modal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 440px; text-align: center; padding: 28px 24px;">
+      <div class="modal-header" style="justify-content: flex-end; padding: 0; margin-bottom: 8px; border: none;">
+        <button id="btn-close-login-modal" class="modal-close-btn" style="font-size: 1.5rem; line-height: 1;">&times;</button>
+      </div>
+
+      <div style="margin-bottom: 12px;">
+        <div style="width: 52px; height: 52px; border-radius: 50%; background: rgba(0, 229, 255, 0.12); border: 2px solid #00e5ff; color: #00e5ff; display: inline-flex; align-items: center; justify-content: center;">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+            <line x1="12" y1="18" x2="12.01" y2="18"></line>
+          </svg>
+        </div>
+      </div>
+      <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 6px; color: #fff;">Sinkronkan dari Spectro Android</h3>
+      <p style="font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary); margin-bottom: 16px;">
+        Hubungkan akun YouTube Music kamu ke PC secara instan menggunakan kode sanding di bawah ini:
+      </p>
+
+      <!-- 6-Digit Pairing Code Card -->
+      <div style="background: rgba(0, 229, 255, 0.05); border: 1.5px dashed #00e5ff; border-radius: 12px; padding: 16px; margin-bottom: 14px;">
+        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 6px;">KODE SANDING WINDOWS</div>
+        <div id="sync-pair-code" style="font-size: 2.2rem; font-weight: 800; letter-spacing: 6px; color: #00e5ff; font-family: monospace;">--- ---</div>
+        <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <button id="btn-copy-pair-code" style="padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            <span id="btn-copy-text">Salin Kode</span>
+          </button>
+          <button id="btn-refresh-pair-code" title="Buat kode baru" style="padding: 6px 12px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #aaa; font-size: 0.78rem; cursor: pointer;">
+            &#x21bb; Baru
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Waiting Status -->
+      <div id="sync-status-indicator" style="padding: 10px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 0.8rem; color: #aaa; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px;">
+        <svg style="animation: spin 1.2s linear infinite;" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#00e5ff" stroke-width="2.5">
+          <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-linecap="round"></circle>
+        </svg>
+        <span id="sync-status-text">Menunggu sambungan dari Spectro HP...</span>
+      </div>
+
+      <!-- 3 Simple Steps -->
+      <div style="text-align: left; background: rgba(255,255,255,0.02); border-radius: 8px; padding: 12px 14px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px;">
+        <div style="font-weight: 600; color: #ddd; margin-bottom: 4px;">Cara Menghubungkan dari HP:</div>
+        <div>1. Buka aplikasi <b>Spectro</b> di HP Android Anda.</div>
+        <div>2. Masuk ke <b>Pengaturan</b> &rarr; ketuk <b>"Sinkronkan ke PC / Windows"</b>.</div>
+        <div>3. Masukkan kode 6 digit di atas lalu tekan <b>Kirim</b>.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Save to Playlist Modal -->
+  <div id="playlist-modal" class="modal-overlay hidden">
+    <div class="modal-card" style="max-width: 420px; width: 92%;">
+      <div class="modal-header">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="#00e5ff">
+            <path d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/>
+          </svg>
+          <h3 style="font-size: 1.1rem; font-weight: 700; color: #fff; margin: 0;">Simpan ke Playlist</h3>
+        </div>
+        <button id="btn-close-playlist-modal" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px;">
+        <div id="playlist-modal-track-info" style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px; padding: 10px; background: rgba(255,255,255,0.04); border-radius: 8px;">
+          <img id="playlist-modal-art" src="logo.png" alt="Art" style="width: 44px; height: 44px; border-radius: 6px; object-fit: cover;">
+          <div style="flex: 1; overflow: hidden;">
+            <div id="playlist-modal-title" style="font-size: 0.9rem; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Judul Lagu</div>
+            <div id="playlist-modal-artist" style="font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Artis</div>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <label style="font-size: 0.78rem; color: var(--text-muted); display: block; margin-bottom: 6px;">Buat Playlist Baru:</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="text" id="input-new-playlist-title" placeholder="Nama playlist baru..." style="flex: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.15); background: #181818; color: #fff; font-size: 0.85rem; outline: none;">
+            <button id="btn-create-playlist" style="padding: 8px 14px; background: var(--accent-cyan); color: #000; font-weight: 700; border: none; border-radius: 6px; cursor: pointer; font-size: 0.82rem; white-space: nowrap;">Buat</button>
+          </div>
+        </div>
+
+        <div style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px;">Pilih Playlist:</div>
+        <div id="playlist-modal-list" style="max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;">
+          <div style="padding: 20px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">Memuat daftar playlist...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Equalizer Dialog Modal -->
+  <div id="equalizer-modal" class="modal-overlay hidden">
+    <div class="modal-card eq-modal-card">
+      <div class="modal-header">
+        <div class="eq-header-title">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="#1db954">
+            <path d="M10 20h4V4h-4v16zm-6 0h4v-8H4v8zM16 9v11h4V9h-4z"/>
+          </svg>
+          <h3>Equalizer & Efek Suara</h3>
+        </div>
+        <button id="btn-close-equalizer-modal" class="modal-close-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="eq-preset-row">
+          <label for="eq-preset-select">Preset Suara:</label>
+          <select id="eq-preset-select" class="eq-select">
+            <option value="flat">Normal (Datar)</option>
+            <option value="bass">Bass Booster</option>
+            <option value="vocal">Vokal Jernih</option>
+            <option value="rock">Rock Bertenaga</option>
+            <option value="pop">Pop Dinamis</option>
+            <option value="acoustic">Akustik Hangat</option>
+            <option value="edm">Elektronik / EDM</option>
+          </select>
+        </div>
+
+        <div class="eq-sliders-container">
+          <div class="eq-band">
+            <span class="eq-gain-val" id="eq-val-0">0 dB</span>
+            <input type="range" class="eq-slider" id="eq-band-0" min="-12" max="12" value="0" orient="vertical">
+            <span class="eq-freq-label">60 Hz</span>
+          </div>
+          <div class="eq-band">
+            <span class="eq-gain-val" id="eq-val-1">0 dB</span>
+            <input type="range" class="eq-slider" id="eq-band-1" min="-12" max="12" value="0" orient="vertical">
+            <span class="eq-freq-label">230 Hz</span>
+          </div>
+          <div class="eq-band">
+            <span class="eq-gain-val" id="eq-val-2">0 dB</span>
+            <input type="range" class="eq-slider" id="eq-band-2" min="-12" max="12" value="0" orient="vertical">
+            <span class="eq-freq-label">910 Hz</span>
+          </div>
+          <div class="eq-band">
+            <span class="eq-gain-val" id="eq-val-3">0 dB</span>
+            <input type="range" class="eq-slider" id="eq-band-3" min="-12" max="12" value="0" orient="vertical">
+            <span class="eq-freq-label">3.6 kHz</span>
+          </div>
+          <div class="eq-band">
+            <span class="eq-gain-val" id="eq-val-4">0 dB</span>
+            <input type="range" class="eq-slider" id="eq-band-4" min="-12" max="12" value="0" orient="vertical">
+            <span class="eq-freq-label">14 kHz</span>
+          </div>
+        </div>
+
+        <div class="eq-extra-controls">
+          <div class="eq-extra-item">
+            <span>Bass Boost</span>
+            <input type="range" id="eq-bass-boost" min="0" max="10" value="0" class="eq-horizontal-slider">
+            <span id="eq-bass-val">0%</span>
+          </div>
+          <div class="eq-extra-item">
+            <span>Surround 3D</span>
+            <input type="range" id="eq-surround" min="0" max="10" value="0" class="eq-horizontal-slider">
+            <span id="eq-surround-val">0%</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Menu Dropdown (Settings & Logout) -->
+  <div id="user-menu-dropdown" class="user-dropdown hidden">
+    <div class="user-dropdown-header">
+      <div id="dropdown-user-name" class="dropdown-name">Nazar</div>
+      <div id="dropdown-user-handle" class="dropdown-handle">@nazaryosa</div>
+    </div>
+    <div class="dropdown-divider"></div>
+    <button id="btn-dropdown-settings" class="dropdown-item">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+      <span>Pengaturan</span>
+    </button>
+    <button id="btn-logout" class="dropdown-item logout-btn">
+      <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+      <span>Keluar dari Akun</span>
+    </button>
+  </div>
+
+  <script src="mqttws31.min.js"></script>
+  <script src="app.js?v=1.1.4"></script>
+  <script src="https://www.youtube.com/iframe_api"></script>
+</body>
+</html>

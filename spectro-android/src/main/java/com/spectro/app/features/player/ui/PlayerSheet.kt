@@ -1,0 +1,839 @@
+package com.spectro.app.features.player.ui
+
+// Android back handling
+import com.spectro.app.core.device.artistLine
+import com.spectro.app.core.device.isDeviceTrack
+import com.spectro.app.core.radio.isRadioTrack
+import androidx.activity.compose.BackHandler
+// Compose animation
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+// Compose layouts and foundations
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+// Material 3 components
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.surfaceColorAtElevation
+// Compose state and runtime
+import kotlinx.coroutines.flow.map
+import com.spectro.app.features.settings.data.SettingsStore
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+// UI styling and utilities
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp as lerpColor
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.util.lerp
+// Coroutines
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+// Math
+import kotlin.math.abs
+import kotlin.math.roundToInt
+// Project resources
+import com.spectro.app.core.designsystem.icons.SpectroIcons
+import com.spectro.app.core.designsystem.theme.DarkColors
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+import com.spectro.app.core.lyrics.LyricsRepository
+import com.spectro.app.core.lyrics.LyricsSettings
+import com.spectro.app.core.lyrics.LyricsSettingsStore
+import com.spectro.app.core.lyrics.LyricsTranslation
+import com.spectro.app.core.playback.PlayableTrack
+import com.spectro.app.core.navigation.ItemNavigator
+import com.spectro.app.core.playback.PlayerConnection
+import com.spectro.app.core.playback.RadioQueue
+import com.spectro.app.features.home.data.HomeItem
+import com.spectro.app.features.like.ui.rememberLikeState
+import com.spectro.app.features.home.data.HomeItemKind
+import com.spectro.app.features.menu.ItemMenu
+import com.spectro.app.features.player.ui.components.ArtistPickerSheet
+import com.spectro.app.features.player.ui.components.AlbumCover
+import com.spectro.app.features.player.ui.components.ExpandedPlayerContent
+import com.spectro.app.features.player.ui.components.LyricsSearchSheet
+import com.spectro.app.features.player.ui.components.LyricsSettingsSheet
+import com.spectro.app.features.player.ui.components.LyricsState
+import com.spectro.app.features.player.ui.components.PlaybackQueue
+import com.spectro.app.features.player.ui.components.PlayerControls
+import com.spectro.app.features.player.ui.components.PlayerDimens
+import com.spectro.app.features.player.ui.components.PlayerExpandedHeader
+import com.spectro.app.features.player.ui.components.PlayerLyricsOverlay
+import com.spectro.app.features.player.ui.components.VinylMiniPlayer
+import com.spectro.app.features.player.ui.components.placedAt
+import com.spectro.app.features.player.ui.components.rememberLandscapeFrame
+
+// Milliseconds in a second, for the length the lyrics are matched by
+private const val MillisPerSecond = 1000L
+
+// Room the screens leave at their end so the pill does not cover their last items
+val LocalMiniPlayerInset = compositionLocalOf { PlayerDimens.None }
+
+// Direction a drag on the player took when it started
+private enum class DragAxis { Horizontal, Vertical }
+
+// Player of the old Spectro, a pill above the navigation bar that grows into the full player and back
+@Composable
+fun PlayerSheet(
+    bottomPadding: Dp,
+    isLandscape: Boolean,
+    modifier: Modifier = Modifier,
+    // How far the middle of the pill moves from the middle of the screen, so it sits in the middle of the content
+    pillShift: Dp = PlayerDimens.None
+) {
+    val track by PlayerConnection.track.collectAsState()
+
+    // A new pill rises each time the player opens, and leaves when it is emptied
+    track?.let { current ->
+        PlayerSheetContent(
+            track = current,
+            bottomPadding = bottomPadding,
+            isLandscape = isLandscape,
+            pillShift = pillShift,
+            modifier = modifier
+        )
+    }
+}
+
+// The sheet itself, its place set by how far it is open, from the pill at the bottom to the whole screen
+// How far it is open is read only while measuring and drawing, so dragging and the springs never build the player again
+@Composable
+private fun PlayerSheetContent(
+    track: PlayableTrack,
+    bottomPadding: Dp,
+    isLandscape: Boolean,
+    pillShift: Dp,
+    modifier: Modifier = Modifier
+) {
+    val isPlaying by PlayerConnection.isPlaying.collectAsState()
+    val isLoading by PlayerConnection.isLoading.collectAsState()
+    val repeatMode by PlayerConnection.repeat.collectAsState()
+    val isShuffleActive by PlayerConnection.shuffle.collectAsState()
+    val density = LocalDensity.current
+    val scope = rememberCoroutineScope()
+    val sheetColor = Color(0xFF161622)
+    val openColor = Color.Black
+    val borderBase = MaterialTheme.colorScheme.onSurface
+
+    var isExpanded by rememberSaveable { mutableStateOf(false) }
+    val like = rememberLikeState(track.id)
+    // A station is live, it has no lyrics, no queue and no song before or after it
+    val isLive = isRadioTrack(track.id)
+
+    // The screen stays on while the full player is open, when the user asked
+    val keepScreenOnContext = LocalContext.current
+    val view = LocalView.current
+    val keepScreenOn by remember { SettingsStore(keepScreenOnContext).playback.map { it.keepScreenOn } }.collectAsState(initial = false)
+    DisposableEffect(isExpanded, keepScreenOn) {
+        view.keepScreenOn = isExpanded && keepScreenOn
+        onDispose { view.keepScreenOn = false }
+    }
+
+    val coverUrl = track.artworkUrl
+    var isLyricsActive by rememberSaveable { mutableStateOf(false) }
+    var showLyricsOptions by rememberSaveable { mutableStateOf(false) }
+    var showArtists by rememberSaveable { mutableStateOf(false) }
+    var showLyricsSearch by rememberSaveable { mutableStateOf(false) }
+    var isQueueActive by rememberSaveable { mutableStateOf(false) }
+    var lyricsSearch by remember { mutableIntStateOf(0) }
+    val context = LocalContext.current
+
+    // Options of the lyrics, saved on the device
+    val lyricsStore = remember { LyricsSettingsStore(context) }
+    val lyricsSettings by lyricsStore.settings.collectAsState(initial = LyricsSettings())
+    val activeSources = lyricsSettings.activeSources
+
+    // A new search starts for each song, each change of the sources and each search asked again
+    var lyricsState by remember(track.id, activeSources, lyricsSearch) { mutableStateOf<LyricsState>(LyricsState.Loading) }
+    var translation by remember(track.id) { mutableStateOf<LyricsTranslation?>(null) }
+
+    // Lyrics are searched the first time they open for a song
+    LaunchedEffect(track.id, isLyricsActive, activeSources, lyricsSearch) {
+        if (!isLyricsActive || lyricsState !is LyricsState.Loading) return@LaunchedEffect
+        val durationSeconds = (PlayerConnection.durationMs / MillisPerSecond).toInt()
+        val lyrics = LyricsRepository.lyrics(context, track.id, track.title, track.artist.orEmpty(), durationSeconds, activeSources) { first ->
+            // The first lyrics that come show at once, a better kind that comes in the next seconds takes their place
+            if (lyricsState is LyricsState.Loading) lyricsState = LyricsState.Ready(first, translation = null)
+        }
+        lyricsState = if (lyrics == null) LyricsState.NotFound else LyricsState.Ready(lyrics, translation = null)
+    }
+
+    // The translation follows the switch and the chosen language
+    val foundLyrics = (lyricsState as? LyricsState.Ready)?.lyrics
+    LaunchedEffect(foundLyrics, lyricsSettings.translate, lyricsSettings.targetLanguage) {
+        translation = if (foundLyrics != null && lyricsSettings.translate) {
+            LyricsRepository.translation(track.id, foundLyrics, lyricsSettings.targetLanguage)
+        } else {
+            null
+        }
+    }
+    val shownLyrics = (lyricsState as? LyricsState.Ready)?.copy(translation = translation) ?: lyricsState
+
+    // Position and length of the song, read from the player only while it plays
+    var playbackProgress by remember { mutableFloatStateOf(PlayerConnection.progress) }
+    var durationMs by remember { mutableLongStateOf(PlayerConnection.durationMs) }
+    LaunchedEffect(isPlaying, track.id) {
+        do {
+            playbackProgress = PlayerConnection.progress
+            durationMs = PlayerConnection.durationMs
+            if (isPlaying) {
+                delay(
+                    when {
+                        isLyricsActive -> PlayerDimens.LyricsRefreshMillis
+                        isExpanded -> PlayerDimens.ProgressRefreshMillis
+                        else -> PlayerDimens.RingRefreshMillis
+                    }
+                )
+            }
+        } while (isPlaying)
+    }
+
+    // The back button closes the queue, then the lyrics, then the open player, before anything else
+    BackHandler(enabled = isExpanded) {
+        when {
+            isQueueActive -> isQueueActive = false
+            isLyricsActive -> isLyricsActive = false
+            else -> isExpanded = false
+        }
+    }
+
+    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+        val fullHeight = maxHeight
+        val screenWidth = maxWidth
+        val maxOffset = with(density) { (fullHeight - PlayerDimens.MiniHeight - bottomPadding).toPx() }
+        val flingVelocity = with(density) { PlayerDimens.FlingVelocity.toPx() }
+
+        // A player that was open when the screen turned comes back open at once, with no rise to watch
+        val containerAlpha = remember { Animatable(if (isExpanded) 1f else 0f) }
+        val offsetY = remember { Animatable(if (isExpanded) 0f else maxOffset) }
+        // The little way below its place the pill comes up from, the pull that closes it in reverse
+        val entranceY = remember { Animatable(if (isExpanded) 0f else PlayerDimens.EntranceOffsetPx) }
+        val offsetX = remember { Animatable(0f) }
+        var dismissDrag by remember { mutableFloatStateOf(0f) }
+        var hasEntered by remember { mutableStateOf(isExpanded) }
+
+        // Fades in and comes up once, apart from the movements, so one that cuts another short never leaves the player half seen
+        LaunchedEffect(Unit) {
+            launch { entranceY.animateTo(0f, tween(PlayerDimens.EntranceFadeMillis)) }
+            containerAlpha.animateTo(1f, tween(PlayerDimens.EntranceFadeMillis))
+        }
+
+        // Share of the opening, zero as the pill and one as the whole screen, read while measuring and drawing
+        val progress: () -> Float = remember(maxOffset) { { (1f - offsetY.value / maxOffset).coerceIn(0f, 1f) } }
+        val isCollapsed by remember(progress) { derivedStateOf { progress() < PlayerDimens.CollapsedThreshold } }
+        val showContent by remember(progress) { derivedStateOf { progress() > PlayerDimens.ContentStart } }
+        val inLyricsZone by remember(progress) { derivedStateOf { progress() >= PlayerDimens.LyricsStart } }
+        val isFullyOpen by remember(progress) { derivedStateOf { progress() > PlayerDimens.LyricsFullStart } }
+
+        // Queue over the open player, hidden one screen below while closed
+        val maxQueueOffset = with(density) { fullHeight.toPx() }
+        val queueOffsetY = remember { Animatable(maxQueueOffset) }
+        var isDraggingQueue by remember { mutableStateOf(false) }
+        val inQueueZone by remember(progress) { derivedStateOf { progress() >= PlayerDimens.QueueShowStart } }
+        val isQueueMoved by remember(maxQueueOffset) { derivedStateOf { queueOffsetY.value < maxQueueOffset } }
+
+        // Opens and closes the queue when asked by the toolbar, the close button or the back button
+        LaunchedEffect(isQueueActive, maxQueueOffset) {
+            if (!isDraggingQueue) {
+                queueOffsetY.animateTo(
+                    if (isQueueActive) 0f else maxQueueOffset,
+                    spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow)
+                )
+            }
+        }
+
+        // Standing, with the lyrics open the cover and the song fade out and the player darkens
+        val lyricsShown = isLyricsActive && inLyricsZone
+        val coverAlpha by animateFloatAsState(if (lyricsShown && !isLandscape) 0f else 1f, tween(PlayerDimens.LyricsCoverFadeMillis), label = "CoverAlpha")
+        val dimAlpha by animateFloatAsState(
+            if (isLyricsActive && isFullyOpen && !isLandscape) 1f else 0f,
+            tween(PlayerDimens.LyricsDimMillis),
+            label = "LyricsDim"
+        )
+
+        // Lying down, the song moves to the start beside a small cover and stays in reach while the lyrics or the queue take the end
+        val frame = if (isLandscape) rememberLandscapeFrame(screenWidth, fullHeight) else null
+        val panelShare = animateFloatAsState(
+            if (isLandscape && (isLyricsActive || isQueueActive)) 1f else 0f,
+            tween(PlayerDimens.LandscapePanelMillis),
+            label = "LandscapePanel"
+        )
+        val panel: () -> Float = remember { { panelShare.value } }
+
+        // Takes its place at once and follows the bottom when the bars change, since the bar is only measured after the first frame
+        LaunchedEffect(maxOffset) {
+            offsetY.snapTo(if (isExpanded) 0f else maxOffset)
+            hasEntered = true
+        }
+
+        // Opens and closes when asked by a tap, the arrow or the back button
+        LaunchedEffect(isExpanded) {
+            if (!isExpanded) {
+                isLyricsActive = false
+                isQueueActive = false
+            }
+            // A tap while the pill is still rising ends its entrance and opens the player, instead of being lost
+            if (hasEntered || isExpanded) {
+                hasEntered = true
+                offsetY.animateTo(if (isExpanded) 0f else maxOffset, spring(PlayerDimens.ExpandDamping, PlayerDimens.ExpandStiffness))
+            }
+        }
+
+        val baseFraction = if (isLandscape) PlayerDimens.MiniWidthFractionLandscape else PlayerDimens.MiniWidthFraction
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer { alpha = containerAlpha.value }
+        ) {
+            Box(
+                modifier = Modifier
+                    // Grows from zero to the whole screen and follows the drag
+                    .layout { measurable, constraints ->
+                        val opening = progress()
+                        if (opening <= 0.02f) {
+                            layout(0, 0) {}
+                        } else {
+                            val width = (constraints.maxWidth * (baseFraction + opening * (1f - baseFraction))).roundToInt()
+                            val height = lerp(PlayerDimens.MiniHeight.toPx(), constraints.maxHeight.toFloat(), opening).roundToInt()
+                            val placeable = measurable.measure(Constraints.fixed(width, height))
+                            val shift = (pillShift.toPx() * (1f - opening)).roundToInt()
+                            layout(constraints.maxWidth, constraints.maxHeight) {
+                                placeable.place((constraints.maxWidth - width) / 2 + shift + offsetX.value.roundToInt(), (offsetY.value + entranceY.value).roundToInt())
+                            }
+                        }
+                    }
+                    .graphicsLayer {
+                        val opening = progress()
+                        alpha = ((opening - 0.02f) / 0.15f).coerceIn(0f, 1f)
+                        shape = RoundedCornerShape(lerp(PlayerDimens.MiniCorner, PlayerDimens.None, opening))
+                        clip = true
+                    }
+                    .drawWithContent {
+                        val opening = progress()
+                        if (opening > 0.02f) {
+                            drawRect(openColor)
+                            drawContent()
+                        }
+                    }
+                    .pointerInput(maxOffset) {
+                        var axis: DragAxis? = null
+                        var startOffset = 0f
+                        var travelled = 0f
+                        val velocity = VelocityTracker()
+
+                        detectDragGestures(
+                            onDragStart = {
+                                if (progress() <= 0.05f) return@detectDragGestures
+                                axis = null
+                                startOffset = offsetY.value
+                                travelled = 0f
+                                velocity.resetTracking()
+                            },
+                            onDragEnd = {
+                                // The finger moves with the sheet, so its speed comes from the whole way it travelled
+                                val speed = velocity.calculateVelocity().y
+                                scope.launch {
+                                    when {
+                                        // Right goes back, left goes on, a short drag springs back
+                                        axis == DragAxis.Horizontal -> {
+                                            val threshold = size.width * PlayerDimens.SwipeFraction
+                                            when {
+                                                offsetX.value > threshold -> PlayerConnection.skipToPrevious()
+                                                offsetX.value < -threshold -> PlayerConnection.skipToNext()
+                                            }
+                                            offsetX.animateTo(0f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessMediumLow))
+                                        }
+
+                                        // Pulled far or fast enough below the pill, the player closes and the song stops
+                                        dismissDrag > 0f -> {
+                                            if (dismissDrag > PlayerDimens.DismissDistancePx || speed > PlayerDimens.DismissVelocity) {
+                                                launch { containerAlpha.animateTo(0f, tween(PlayerDimens.DismissFadeMillis)) }
+                                                offsetY.animateTo(maxOffset + PlayerDimens.EntranceOffsetPx, tween(PlayerDimens.DismissFadeMillis))
+                                                PlayerConnection.stop()
+                                            } else {
+                                                dismissDrag = 0f
+                                                containerAlpha.animateTo(1f, spring())
+                                            }
+                                        }
+
+                                        // A fling follows its direction, a slow release goes on once a quarter of the way is dragged
+                                        else -> {
+                                            val wasOpen = startOffset < maxOffset / 2
+                                            val moved = abs(offsetY.value - startOffset) / maxOffset
+                                            val open = !isLive && when {
+                                                speed < -flingVelocity -> true
+                                                speed > flingVelocity -> false
+                                                moved > PlayerDimens.PositionalThreshold -> !wasOpen
+                                                else -> wasOpen
+                                            }
+                                            offsetY.animateTo(if (open) 0f else maxOffset, spring(PlayerDimens.ExpandDamping, PlayerDimens.ExpandStiffness))
+                                            isExpanded = open
+                                        }
+                                    }
+                                }
+                            },
+                            onDragCancel = {
+                                scope.launch {
+                                    dismissDrag = 0f
+                                    launch { offsetX.animateTo(0f, spring()) }
+                                    launch { offsetY.animateTo(if (isExpanded) 0f else maxOffset, spring(PlayerDimens.ExpandDamping, PlayerDimens.ExpandStiffness)) }
+                                    containerAlpha.animateTo(1f, spring())
+                                }
+                            }
+                        ) { change, drag ->
+                            change.consume()
+                            travelled += drag.y
+                            velocity.addPosition(change.uptimeMillis, Offset(0f, travelled))
+                            if (axis == null) {
+                                // A station has no song before or after it, so a drag to the side does nothing
+                                val sideways = abs(drag.x) > abs(drag.y) && offsetY.value >= maxOffset && !isLive
+                                axis = if (sideways) DragAxis.Horizontal else DragAxis.Vertical
+                            }
+
+                            scope.launch {
+                                if (axis == DragAxis.Horizontal) {
+                                    offsetX.snapTo(offsetX.value + drag.x)
+                                } else if (offsetY.value >= maxOffset && (drag.y > 0f || dismissDrag > 0f)) {
+                                    // Below the pill the drag fades it out instead of moving it
+                                    dismissDrag = (dismissDrag + drag.y).coerceAtLeast(0f)
+                                    containerAlpha.snapTo(1f - (dismissDrag / PlayerDimens.DismissDistancePx).coerceIn(0f, 1f))
+                                } else if (!isLive) {
+                                    // A station stays a pill, only the way down, which ends it, is open
+                                    offsetY.snapTo((offsetY.value + drag.y).coerceIn(0f, maxOffset))
+                                }
+                            }
+                        }
+                    }
+            ) {
+                AlbumCover(
+                    progress = progress,
+                    coverAlpha = { coverAlpha },
+                    imageUrl = coverUrl,
+                    // A station is live and has no end, so its ring is whole instead of going back and forth with the data that comes
+        songProgress = { if (isLive) 1f else playbackProgress },
+                    screenWidth = screenWidth,
+                    screenHeight = fullHeight,
+                    frame = frame,
+                    panel = panel
+                )
+
+                // Solid black over the player while the lyrics are open, a tap on it closes them
+                if (dimAlpha > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = dimAlpha }
+                            .background(Color.Black)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                enabled = isLyricsActive
+                            ) { isLyricsActive = false }
+                    )
+                }
+
+                // The pages of the song are asked as soon as it plays, so a tap on its names opens them at once
+                LaunchedEffect(track.id) { if (!isDeviceTrack(track.id)) RadioQueue.links(context, track.id) }
+
+                if (!lyricsShown || coverAlpha > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .graphicsLayer { alpha = coverAlpha }
+                    ) {
+                        PlayerExpandedHeader(
+                            progress = progress,
+                            frame = frame,
+                            panel = panel,
+                            fullHeight = fullHeight,
+                            screenWidth = screenWidth,
+                            title = track.title,
+                            artist = track.artistLine().orEmpty(),
+                            songId = track.id,
+                            isFavorite = like.isLiked,
+                            onFavoriteClick = like.toggle,
+                            onTitleClick = {
+                                if (isDeviceTrack(track.id)) return@PlayerExpandedHeader
+                                RadioQueue.cachedLinks(track.id)?.albumId?.let { id ->
+                                    if (ItemNavigator.openAlbum(id)) isExpanded = false
+                                }
+                            },
+                            onArtistClick = {
+                                if (isDeviceTrack(track.id)) return@PlayerExpandedHeader
+                                scope.launch {
+                                    // The links are ready already in most cases, otherwise they are asked now
+                                    val artists = (RadioQueue.cachedLinks(track.id) ?: RadioQueue.links(context, track.id).getOrNull())?.artists.orEmpty()
+                                    // One artist opens at once, two or more are listed to pick from
+                                    if (artists.size > 1) {
+                                        showArtists = true
+                                    } else {
+                                        artists.firstOrNull()?.second?.takeIf { it.isNotEmpty() }?.let { id ->
+                                            if (ItemNavigator.openArtist(id)) isExpanded = false
+                                        }
+                                    }
+                                }
+                            }
+                        )
+                    }
+                }
+
+                PlayerLyricsOverlay(
+                    visible = lyricsShown,
+                    frame = frame,
+                    state = shownLyrics,
+                    settings = lyricsSettings,
+                    positionMs = { (playbackProgress * durationMs).toLong() },
+                    title = track.title,
+                    artist = track.artist.orEmpty(),
+                    onOptionsClick = { showLyricsOptions = true },
+                    onSeek = { time ->
+                        if (durationMs > 0) playbackProgress = time.toFloat() / durationMs
+                        PlayerConnection.seekTo(playbackProgress)
+                    },
+                    onDismiss = { isLyricsActive = false }
+                )
+
+                // A station has no open player, so it closes when one starts
+                // A page opened from a menu of the player lands under it, so the player closes to show it
+                LaunchedEffect(Unit) { ItemNavigator.opened.collect { isExpanded = false } }
+
+                LaunchedEffect(isLive) {
+                    if (isLive) {
+                        isLyricsActive = false
+                        isQueueActive = false
+                        isExpanded = false
+                    }
+                }
+
+                // A tap on the open cover shows the lyrics, lying down it follows the cover and a tap on the small one brings the big one back
+                if (isFullyOpen && (frame != null || !isLyricsActive)) {
+                    Box(
+                        modifier = Modifier
+                            .then(
+                                if (frame != null) {
+                                    Modifier.placedAt(
+                                        x = { frame.coverX },
+                                        y = { frame.coverTop(panel()) },
+                                        width = { frame.coverSize(panel()) },
+                                        height = { frame.coverSize(panel()) }
+                                    )
+                                } else {
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .fillMaxHeight(PlayerDimens.LyricsTapHeightFraction)
+                                        .padding(top = PlayerDimens.LyricsTapTop)
+                                }
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                val isSideOpen = isLyricsActive || isQueueActive
+                                isQueueActive = false
+                                isLyricsActive = !isSideOpen
+                            }
+                    )
+                }
+
+                // Dragging up from the bottom of the open player brings the queue, a tap opens it, lying down the bottom is the controls and the queue has its button on the line of the tools
+                if (isFullyOpen && !isLandscape) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(PlayerDimens.QueueDragArea)
+                            .align(Alignment.BottomCenter)
+                            .pointerInput(maxQueueOffset) {
+                                detectDragGestures(
+                                    onDragStart = { isDraggingQueue = true },
+                                    onDragEnd = {
+                                        isDraggingQueue = false
+                                        val threshold = maxQueueOffset * PlayerDimens.QueueOpenFraction
+                                        // Closed it opens after a short pull, open it closes past the half
+                                        val open = if (isQueueActive) {
+                                            queueOffsetY.value < maxQueueOffset / 2
+                                        } else {
+                                            queueOffsetY.value < maxQueueOffset - threshold
+                                        }
+                                        scope.launch {
+                                            queueOffsetY.animateTo(
+                                                if (open) 0f else maxQueueOffset,
+                                                spring(Spring.DampingRatioLowBouncy, Spring.StiffnessMedium)
+                                            )
+                                        }
+                                        if (open) isLyricsActive = false
+                                        isQueueActive = open
+                                    },
+                                    onDragCancel = {
+                                        isDraggingQueue = false
+                                        scope.launch { queueOffsetY.animateTo(if (isQueueActive) 0f else maxQueueOffset, spring()) }
+                                    }
+                                ) { change, drag ->
+                                    change.consume()
+                                    scope.launch { queueOffsetY.snapTo((queueOffsetY.value + drag.y).coerceIn(0f, maxQueueOffset)) }
+                                }
+                            }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null
+                            ) {
+                                if (progress() >= PlayerDimens.QueueTapStart) {
+                                    isLyricsActive = false
+                                    isQueueActive = true
+                                }
+                            }
+                    )
+                }
+
+                // Queue, drawn only while it is open or on its way
+                val queueLayer: @Composable () -> Unit = {
+                    if (inQueueZone && (isQueueActive || isQueueMoved)) {
+                        PlaybackQueue(
+                            frame = frame,
+                            onClose = { isQueueActive = false },
+                            modifier = Modifier
+                                .then(if (frame != null) Modifier.padding(start = frame.sideStart, end = frame.sideEnd) else Modifier)
+                                .graphicsLayer {
+                                    translationY = queueOffsetY.value
+                                    val fadeStart = if (frame != null) PlayerDimens.LandscapeQueueFadeStart else 0f
+                                    alpha = ((1f - queueOffsetY.value / maxQueueOffset - fadeStart) / (1f - fadeStart)).coerceIn(0f, 1f)
+                                }
+                        )
+                    }
+                }
+
+                // Lying down it is a side under the line of the tools, so they stay in reach, in the dark colors of the player around it
+                if (frame != null) DarkColors(queueLayer)
+
+                // Composed from the start, so the work of the first opening is already done when it is tapped, but it is only placed while it shows
+                // The song position reaches it only while it shows, so a playing song does not rebuild what nobody sees
+                run {
+                    ExpandedPlayerContent(
+                        onMinimize = { isExpanded = false },
+                        progress = if (showContent) playbackProgress else 0f,
+                        isActive = showContent,
+                        durationMs = durationMs,
+                        onSeek = { target ->
+                            playbackProgress = target
+                            PlayerConnection.seekTo(target)
+                        },
+                        isLyricsActive = isLyricsActive,
+                        onLyricsToggle = {
+                            isLyricsActive = !isLyricsActive
+                            if (isLyricsActive) isQueueActive = false
+                        },
+                        onMoreClick = {
+                            track?.let { current ->
+                                ItemMenu.show(
+                                    HomeItem(
+                                        kind = HomeItemKind.Song,
+                                        id = current.id,
+                                        title = current.title,
+                                        thumbnailUrl = current.artworkUrl,
+                                        artists = listOfNotNull(current.artist),
+                                        durationSeconds = (current.durationMs / MillisPerSecond).toInt().takeIf { it > 0 }
+                                    )
+                                )
+                            }
+                        },
+                        isQueueActive = isQueueActive,
+                        onQueueToggle = {
+                            isQueueActive = !isQueueActive
+                            if (isQueueActive) isLyricsActive = false
+                        },
+                        repeatMode = repeatMode,
+                        onRepeatClick = PlayerConnection::toggleRepeat,
+                        isShuffleActive = isShuffleActive,
+                        onShuffleClick = PlayerConnection::toggleShuffle,
+                        songId = track.id,
+                        isFavorite = like.isLiked,
+                        onFavoriteClick = like.toggle,
+                        frame = frame,
+                        panel = panel,
+                        screenHeight = fullHeight,
+                        modifier = Modifier
+                            .layout { measurable, constraints ->
+                                val placeable = measurable.measure(constraints)
+                                if (showContent) layout(placeable.width, placeable.height) { placeable.place(0, 0) } else layout(0, 0) {}
+                            }
+                            .graphicsLayer {
+                                alpha = ((progress() - PlayerDimens.ContentStart) * PlayerDimens.ContentFadeSpeed).coerceIn(0f, 1f)
+                            }
+                    )
+                }
+
+                PlayerControls(
+                    progress = progress,
+                    isPlaying = isPlaying,
+                    isLoading = isLoading,
+                    onPlayPauseToggle = PlayerConnection::togglePlayPause,
+                    onNext = PlayerConnection::skipToNext,
+                    onPrevious = PlayerConnection::skipToPrevious,
+                    screenWidth = screenWidth,
+                    screenHeight = fullHeight,
+                    frame = frame,
+                    panel = panel,
+                    castAlpha = { coverAlpha }
+                )
+
+                // Standing the queue goes over everything
+                if (frame == null) queueLayer()
+
+                // Options of the lyrics over everything, every change is saved at once
+                if (showArtists) {
+                    ArtistPickerSheet(
+                        artists = RadioQueue.cachedLinks(track.id)?.artists.orEmpty(),
+                        onArtistClick = { id ->
+                            showArtists = false
+                            if (ItemNavigator.openArtist(id)) isExpanded = false
+                        },
+                        onDismiss = { showArtists = false }
+                    )
+                }
+
+                if (showLyricsOptions) {
+                    LyricsSettingsSheet(
+                        settings = lyricsSettings,
+                        onChange = { changed -> scope.launch { lyricsStore.save(changed) } },
+                        onSearchAgain = {
+                            showLyricsOptions = false
+                            // The search starts only after the saved lyrics are gone
+                            scope.launch {
+                                LyricsRepository.forget(context, track.id)
+                                lyricsSearch++
+                            }
+                        },
+                        onSearchManually = {
+                            showLyricsOptions = false
+                            showLyricsSearch = true
+                        },
+                        onDismiss = { showLyricsOptions = false }
+                    )
+                }
+
+                // Manual search of the lyrics, the song and the artist can be fixed
+                if (showLyricsSearch) {
+                    LyricsSearchSheet(
+                        initialTitle = track.title,
+                        initialArtist = track.artist.orEmpty(),
+                        onSearch = { title, artist ->
+                            LyricsRepository.search(
+                                context, track.id, title, artist, track.title, track.artist.orEmpty(),
+                                (durationMs / MillisPerSecond).toInt(), activeSources
+                            )
+                        },
+                        onChoose = { match ->
+                            LyricsRepository.choose(context, track.id, match.lyrics)
+                            lyricsState = LyricsState.Ready(match.lyrics, translation = null)
+                            showLyricsSearch = false
+                        },
+                        onDismiss = { showLyricsSearch = false }
+                    )
+                }
+            }
+
+            // Floating Vinyl Mini Player (Piringan Hitam) at bottom right
+            val vinylAlpha = (1f - progress() / 0.12f).coerceIn(0f, 1f)
+            if (vinylAlpha > 0f) {
+                VinylMiniPlayer(
+                    coverUrl = coverUrl,
+                    isPlaying = isPlaying,
+                    progress = if (isLive) 1f else playbackProgress,
+                    onClick = { isExpanded = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = bottomPadding + 8.dp)
+                        .graphicsLayer {
+                            alpha = vinylAlpha
+                            val scale = lerp(1f, 0.85f, (progress() / 0.12f).coerceIn(0f, 1f))
+                            scaleX = scale
+                            scaleY = scale
+                        }
+                )
+            }
+        }
+    }
+}
+
+// Fade from the content into the background behind the pill, so the last items do not show through its sides
+@Composable
+fun MiniPlayerShade(
+    visible: Boolean,
+    isLandscape: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val height = if (isLandscape) {
+        PlayerDimens.MiniBottomLandscape + PlayerDimens.ShadeAbovePillLandscape
+    } else {
+        PlayerDimens.MiniGap + PlayerDimens.ShadeAbovePill
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(PlayerDimens.ShadeFadeMillis)),
+        exit = fadeOut(tween(PlayerDimens.ShadeFadeMillis)),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(height)
+    ) {
+        val background = MaterialTheme.colorScheme.background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, background.copy(alpha = PlayerDimens.ShadeMiddleAlpha), background)
+                    )
+                )
+        )
+    }
+}

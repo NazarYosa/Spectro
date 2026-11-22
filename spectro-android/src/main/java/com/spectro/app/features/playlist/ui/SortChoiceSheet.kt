@@ -1,0 +1,208 @@
+﻿package com.spectro.app.features.playlist.ui
+
+// Android configuration
+import android.content.res.Configuration
+// Compose layouts and foundations
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+// Material 3 components
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+// Compose state and runtime
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+// UI styling and utilities
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+// Project resources
+import com.spectro.app.R
+import com.spectro.app.core.designsystem.components.LocalSheetClose
+import com.spectro.app.core.designsystem.components.ScrollIndicatorWidth
+import com.spectro.app.core.designsystem.components.SpectroSheet
+import com.spectro.app.core.designsystem.components.scrollIndicator
+import com.spectro.app.core.designsystem.icons.SpectroIcons
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+import com.spectro.app.features.menu.ItemMenuDimens
+
+// One way of a choice that goes two ways, its short word, if it is the one in use and what it does when it is chosen
+class SortWay(val label: String, val isSelected: Boolean, val onSelect: () -> Unit)
+
+// One way to choose, the words, if it is the one in use, if it is the one the app starts with and what it does when it is chosen
+// A choice that goes two ways has them as buttons at its end, the one in use is solid and takes the place of the check
+class SortChoice(
+    val title: String,
+    val isSelected: Boolean,
+    val isDefault: Boolean = false,
+    val subtitle: String? = null,
+    val ways: List<SortWay> = emptyList(),
+    val onSelect: () -> Unit
+)
+
+// The choices of a setting or of the order of a page in a card, the one in use has its name in bold and a check at its end
+// A null among the choices is a gap, the ones before it and the ones after it are cards apart
+@Composable
+fun SortChoiceSheet(title: String, choices: List<SortChoice?>, onDismiss: () -> Unit) {
+    SpectroSheet(onDismiss = onDismiss) {
+        val closeSheet = LocalSheetClose.current
+        val scroll = rememberScrollState()
+
+        // The choices between two gaps are one card
+        val groups = remember(choices) {
+            choices.fold(mutableListOf(mutableListOf<SortChoice>())) { cards, choice ->
+                if (choice == null) cards.add(mutableListOf()) else cards.last().add(choice)
+                cards
+            }.filter { it.isNotEmpty() }
+        }
+
+        // The name of the choice on top
+        val head: @Composable () -> Unit = {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = ItemMenuDimens.CreditsTitleStart, vertical = ItemMenuDimens.HeaderVertical)
+            )
+        }
+
+        // The choices, a line between two of them in a card, and a gap between two cards
+        val options: @Composable () -> Unit = {
+            Column(verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGroupGap)) {
+                groups.forEach { group ->
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(ItemMenuDimens.CardCorner))
+                            .background(SpectroTheme.colors.menuCard)
+                    ) {
+                        group.forEachIndexed { index, choice ->
+                            if (index > 0) {
+                                HorizontalDivider(
+                                    modifier = Modifier.padding(horizontal = ItemMenuDimens.CardRowHorizontal),
+                                    thickness = SpectroTheme.dimens.hairline,
+                                    color = MaterialTheme.colorScheme.outlineVariant
+                                )
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardRowTextStart),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        closeSheet()
+                                        choice.onSelect()
+                                    }
+                                    .padding(horizontal = ItemMenuDimens.CardRowHorizontal, vertical = ItemMenuDimens.CardRowVertical)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    // The name of the choice, and a note beside it when it is the one the app starts with
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardRowTagGap)
+                                    ) {
+                                        Text(
+                                            text = choice.title,
+                                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = if (choice.isSelected) FontWeight.Bold else FontWeight.Medium),
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        if (choice.isDefault) {
+                                            Text(
+                                                text = stringResource(R.string.settings_option_default),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    // What the choice means, when it needs a line
+                                    choice.subtitle?.let {
+                                        Text(text = it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                if (choice.ways.isNotEmpty()) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardWayGap)) {
+                                        choice.ways.forEach { way ->
+                                            SortWayButton(way) {
+                                                closeSheet()
+                                                way.onSelect()
+                                            }
+                                        }
+                                    }
+                                } else if (choice.isSelected) {
+                                    Icon(
+                                        imageVector = SpectroIcons.Check,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(ItemMenuDimens.CardRowIcon)
+                                    )
+                                }
+                            }
+
+                        }
+                    }
+                }
+            }
+        }
+
+        // Lying down the screen is too short for the choices, the name stays on the start and the choices scroll on the end
+        if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGroupGap),
+                modifier = Modifier.padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = ItemMenuDimens.LandscapeBottom)
+            ) {
+                Column(modifier = Modifier.weight(ItemMenuDimens.LandscapeHeadWeight).align(Alignment.CenterVertically)) { head() }
+                Column(
+                    modifier = Modifier
+                        .weight(1f - ItemMenuDimens.LandscapeHeadWeight)
+                        .scrollIndicator(scroll)
+                        .verticalScroll(scroll)
+                        .padding(end = ScrollIndicatorWidth + ItemMenuDimens.LandscapeIndicatorGap)
+                ) { options() }
+            }
+        } else {
+            // The bar on the end tells there are more choices below, as with the many countries
+            Column(
+                modifier = Modifier
+                    .scrollIndicator(scroll)
+                    .verticalScroll(scroll)
+                    .padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = ItemMenuDimens.Bottom)
+            ) {
+                head()
+                Spacer(modifier = Modifier.height(ItemMenuDimens.HeaderVertical))
+                options()
+            }
+        }
+    }
+}
+
+// One way of a choice as a small button, solid like a filter that is on when it is the one in use
+@Composable
+private fun SortWayButton(way: SortWay, onClick: () -> Unit) {
+    Text(
+        text = way.label,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (way.isSelected) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.onSurfaceVariant,
+        maxLines = 1,
+        modifier = Modifier
+            .clip(RoundedCornerShape(ItemMenuDimens.CardWayCorner))
+            .background(if (way.isSelected) MaterialTheme.colorScheme.onBackground else SpectroTheme.colors.menuCard)
+            .clickable(onClick = onClick)
+            .padding(horizontal = ItemMenuDimens.CardWayHorizontal, vertical = ItemMenuDimens.CardWayVertical)
+    )
+}

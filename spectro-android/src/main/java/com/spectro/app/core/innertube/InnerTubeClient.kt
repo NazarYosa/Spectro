@@ -1,0 +1,525 @@
+﻿package com.spectro.app.core.innertube
+
+// Coroutines
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+// JSON and network
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+
+// Limits and answers of the requests
+private const val TimeoutMillis = 30_000
+private const val HttpOk = 200
+private const val Attempts = 3
+private const val ErrorBodyMax = 400
+private const val FirstDelayMillis = 500L
+private const val HttpOkEnd = 300
+
+// Where the picture of the cover of a playlist is sent
+private const val PlaylistImageUrl = "https://music.youtube.com/playlist_image_upload/playlist_custom_thumbnail"
+
+// Random name of a playback, the characters and the length YouTube accepts
+private const val NonceAlphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+private const val NonceLength = 16
+private val TransientStatus = setOf(408, 425, 429, 500, 502, 503, 504)
+
+// Where the guest identity of YouTube comes from, the service worker data first and the page of the player after it
+private const val VisitorDataUrl = "https://www.youtube.com/sw.js_data"
+private val VisitorDataPattern = Regex("\"(?:VISITOR_DATA|visitorData)\"\\s*:\\s*\"([^\"]+)\"")
+private const val VisitorDataPosition = 13
+
+// A client of YouTube Music as it presents itself, the web player by default
+data class ClientProfile(
+    val name: String = ClientName,
+    val version: String = ClientVersion,
+    val id: String = ClientId,
+    val userAgent: String = WebUserAgent,
+    // What the request says about where it comes from and who signs it, the web player says all of it
+    val sendOrigin: Boolean = true,
+    val sendSignature: Boolean = true,
+    val sendVisitor: Boolean = true
+)
+
+// The Android app of YouTube Music as it presents itself
+private val AppProfile = ClientProfile(name = AppClientName, version = AppClientVersion, id = AppClientId, userAgent = AppUserAgent)
+
+// The answer of YouTube is not what was expected
+class InnerTubeException(message: String) : IOException(message)
+
+// Requests to the YouTube Music API, as the web player makes them
+object InnerTubeClient {
+    // Home and other pages that are opened by an id, a filter of the page or the continuation of a previous answer
+    suspend fun browse(
+        session: YouTubeSession,
+        browseId: String? = null,
+        params: String? = null,
+        continuation: String? = null,
+        profile: ClientProfile = ClientProfile(),
+        // The values chosen in the form of the page, such as the country of the charts
+        selectedValues: List<String>? = null
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session, profile))
+                .apply {
+                    browseId?.let { put("browseId", it) }
+                    params?.let { put("params", it) }
+                    continuation?.let { put("continuation", it) }
+                    selectedValues?.let { put("formData", JSONObject().put("selectedValues", JSONArray(it))) }
+                }
+
+            // The answer of the page is kept, and used when there is no internet or the request fails
+            val key = OfflineCache.keyOf(browseId, params, continuation, selectedValues?.joinToString(","), session.locale.hl, session.locale.country, (session.cookies != null).toString())
+            if (!OfflineCache.isOnline()) {
+                return@runCatching OfflineCache.get(key)?.let(::JSONObject) ?: throw IOException("There is no internet")
+            }
+
+            try {
+                val text = post("$MusicApi/browse?prettyPrint=false", session, body.toString(), profile)
+                OfflineCache.put(key, text)
+                JSONObject(text)
+            } catch (failure: IOException) {
+                OfflineCache.get(key)?.let(::JSONObject) ?: throw failure
+            }
+        }
+    }
+
+    // Pages only the Android app of YouTube Music is given, such as the comments of an album, asked as that app asks them and never kept for offline use
+    suspend fun appBrowse(
+        session: YouTubeSession,
+        browseId: String? = null,
+        params: String? = null,
+        continuation: String? = null,
+        // What is chosen in the page, such as the order of the comments
+        formData: JSONObject? = null
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session, AppProfile))
+                .apply {
+                    browseId?.let { put("browseId", it) }
+                    params?.let { put("params", it) }
+                    continuation?.let { put("continuation", it) }
+                    formData?.let { put("formData", it) }
+                }
+
+            JSONObject(post("$MusicApi/browse?prettyPrint=false", session, body.toString(), AppProfile))
+        }
+    }
+
+    // The page of a video in the player as the Android app of YouTube Music is given it, which is the one that has the panel of the comments of a song
+    suspend fun appNext(
+        session: YouTubeSession,
+        videoId: String
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session, AppProfile))
+                .put("videoId", videoId)
+
+            JSONObject(post("$MusicApi/next?prettyPrint=false", session, body.toString(), AppProfile))
+        }
+    }
+
+    // Page of a video in the player, with its tabs such as the lyrics, and its queue when a playlist is given
+    suspend fun next(
+        session: YouTubeSession,
+        videoId: String,
+        playlistId: String? = null,
+        continuation: String? = null
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("videoId", videoId)
+                .apply {
+                    playlistId?.let { put("playlistId", it) }
+                    continuation?.let { put("continuation", it) }
+                }
+
+            JSONObject(post("$MusicApi/next?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Results of a search, under the filter its parameters carry, or the next page of them when a continuation is given
+    suspend fun search(
+        session: YouTubeSession,
+        query: String? = null,
+        params: String? = null,
+        continuation: String? = null
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .apply {
+                    query?.let { put("query", it) }
+                    params?.let { put("params", it) }
+                    continuation?.let { put("continuation", it) }
+                }
+
+            JSONObject(post("$MusicApi/search?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Words YouTube Music suggests for what was typed so far, with some songs and artists that match it
+    suspend fun searchSuggestions(
+        session: YouTubeSession,
+        input: String
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("input", input)
+
+            JSONObject(post("$MusicApi/music/get_search_suggestions?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Removes what the tokens point to, such as searches of the history of the account
+    suspend fun feedback(
+        session: YouTubeSession,
+        tokens: List<String>
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("feedbackTokens", JSONArray(tokens))
+
+            JSONObject(post("$MusicApi/feedback?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Subscribes the account to a channel, or takes the subscription away, the params come with the button of the page
+    suspend fun subscription(
+        session: YouTubeSession,
+        channelId: String,
+        subscribe: Boolean,
+        params: String? = null
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("channelIds", JSONArray().put(channelId))
+                .apply { params?.let { put("params", it) } }
+
+            val action = if (subscribe) "subscribe" else "unsubscribe"
+            JSONObject(post("$MusicApi/subscription/$action?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Sends the picture that becomes the cover of a playlist and gives the id that the playlist is changed with
+    suspend fun uploadPlaylistImage(
+        session: YouTubeSession,
+        image: ByteArray
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            // The first step opens the upload and says how big the picture is
+            val start = URL(PlaylistImageUrl).openConnection() as HttpURLConnection
+            val uploadId = try {
+                start.requestMethod = "POST"
+                start.doOutput = true
+                start.connectTimeout = TimeoutMillis
+                start.readTimeout = TimeoutMillis
+                headersFor(session).forEach { (name, value) -> start.setRequestProperty(name, value) }
+                start.setRequestProperty("X-Goog-Upload-Command", "start")
+                start.setRequestProperty("X-Goog-Upload-Protocol", "resumable")
+                start.setRequestProperty("X-Goog-Upload-Header-Content-Length", image.size.toString())
+                start.outputStream.use { }
+                if (start.responseCode !in HttpOk until HttpOkEnd) throw InnerTubeException("YouTube answered ${start.responseCode}")
+                start.getHeaderField("X-Goog-Upload-Id") ?: start.getHeaderField("X-Guploader-Uploadid")
+                    ?: throw InnerTubeException("The upload has no id")
+            } finally {
+                start.disconnect()
+            }
+
+            // The second one sends the picture and finishes
+            val send = URL("$PlaylistImageUrl?upload_id=$uploadId&upload_protocol=resumable").openConnection() as HttpURLConnection
+            try {
+                send.requestMethod = "POST"
+                send.doOutput = true
+                send.connectTimeout = TimeoutMillis
+                send.readTimeout = TimeoutMillis
+                headersFor(session).forEach { (name, value) -> send.setRequestProperty(name, value) }
+                send.setRequestProperty("Content-Type", "image/jpeg")
+                send.setRequestProperty("X-Goog-Upload-Command", "upload, finalize")
+                send.setRequestProperty("X-Goog-Upload-Offset", "0")
+                send.outputStream.use { it.write(image) }
+                if (send.responseCode !in HttpOk until HttpOkEnd) throw InnerTubeException("YouTube answered ${send.responseCode}")
+                JSONObject(send.inputStream.bufferedReader().use { it.readText() }).optString("encryptedBlobId").takeIf { it.isNotEmpty() }
+                    ?: throw InnerTubeException("The upload has no picture id")
+            } finally {
+                send.disconnect()
+            }
+        }
+    }
+
+    // Likes a song, or takes the like away
+    suspend fun rate(
+        session: YouTubeSession,
+        videoId: String,
+        liked: Boolean
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("target", JSONObject().put("videoId", videoId))
+
+            val action = if (liked) "like" else "removelike"
+            JSONObject(post("$MusicApi/like/$action?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Saves an album or a playlist to the library of the account, or takes it out, the same call that likes a song with the id of the playlist as its target
+    suspend fun ratePlaylist(
+        session: YouTubeSession,
+        playlistId: String,
+        saved: Boolean
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("target", JSONObject().put("playlistId", playlistId))
+
+            val action = if (saved) "like" else "removelike"
+            JSONObject(post("$MusicApi/like/$action?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Sets a switch of the account, the same call the official app makes, which the server then follows when it answers
+    suspend fun setAccountSetting(
+        session: YouTubeSession,
+        settingItemId: String,
+        value: Boolean
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("settingItemId", settingItemId)
+                .put("newValue", JSONObject().put("boolValue", value))
+
+            JSONObject(post("$MusicApi/account/set_setting?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // The playlists of the account, each saying whether it already has the songs
+    suspend fun addToPlaylistOptions(
+        session: YouTubeSession,
+        videoIds: List<String>
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("videoIds", JSONArray(videoIds))
+
+            JSONObject(post("$MusicApi/playlist/get_add_to_playlist?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Changes a playlist of the account, the actions add or remove songs or rename it
+    suspend fun editPlaylist(
+        session: YouTubeSession,
+        playlistId: String,
+        actions: List<JSONObject>
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("playlistId", playlistId)
+                .put("actions", JSONArray(actions))
+
+            JSONObject(post("$MusicApi/browse/edit_playlist?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Makes a playlist in the account, with the songs it starts with
+    suspend fun createPlaylist(
+        session: YouTubeSession,
+        title: String,
+        privacyStatus: String,
+        videoIds: List<String>
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("title", title)
+                .put("privacyStatus", privacyStatus)
+                .apply { if (videoIds.isNotEmpty()) put("videoIds", JSONArray(videoIds)) }
+
+            JSONObject(post("$MusicApi/playlist/create?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Takes a playlist out of the account
+    suspend fun deletePlaylist(
+        session: YouTubeSession,
+        playlistId: String
+    ): Result<JSONObject> = withContext(Dispatchers.IO) {
+        runCatching {
+            val body = JSONObject()
+                .put("context", contextFor(session))
+                .put("playlistId", playlistId)
+
+            JSONObject(post("$MusicApi/playlist/delete?prettyPrint=false", session, body.toString()))
+        }
+    }
+
+    // Registers a listening in the history of the account, the address that counts it comes with the stream of the song
+    suspend fun registerPlayback(
+        session: YouTubeSession,
+        address: String
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val nonce = (1..NonceLength).map { NonceAlphabet.random() }.joinToString("")
+            val connection = URL("$address&ver=2&c=$ClientName&cpn=$nonce").openConnection() as HttpURLConnection
+            try {
+                connection.connectTimeout = TimeoutMillis
+                connection.readTimeout = TimeoutMillis
+                headersFor(session).forEach { (name, value) -> connection.setRequestProperty(name, value) }
+                if (connection.responseCode !in HttpOk until HttpOkEnd) throw InnerTubeException("YouTube answered ${connection.responseCode}")
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    // Tells YouTube Music where the listening of a long episode stands, so its progress follows the account on the other apps
+    // The address that counts the time watched comes with the stream of the episode, it is asked with the place the episode is at
+    suspend fun reportWatchTime(
+        session: YouTubeSession,
+        address: String,
+        positionSeconds: Long,
+        lengthSeconds: Long
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            val nonce = (1..NonceLength).map { NonceAlphabet.random() }.joinToString("")
+            val query = "ver=2&c=$ClientName&cpn=$nonce&cmt=$positionSeconds&st=0&et=$positionSeconds&len=$lengthSeconds&state=paused&volume=100&muted=0"
+            val connection = URL("$address&$query").openConnection() as HttpURLConnection
+            try {
+                connection.connectTimeout = TimeoutMillis
+                connection.readTimeout = TimeoutMillis
+                headersFor(session).forEach { (name, value) -> connection.setRequestProperty(name, value) }
+                if (connection.responseCode !in HttpOk until HttpOkEnd) throw InnerTubeException("YouTube answered ${connection.responseCode}")
+            } finally {
+                connection.disconnect()
+            }
+        }
+    }
+
+    // Identity YouTube gives to a visitor, it keeps the recommendations of a guest the same between launches
+    suspend fun fetchVisitorData(locale: YouTubeLocale): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val fromWorker = runCatching { parseWorkerVisitorData(get(VisitorDataUrl, locale)) }.getOrNull()
+            fromWorker
+                ?: VisitorDataPattern.find(get(MusicOrigin, locale))?.groupValues?.get(1)
+                ?: throw InnerTubeException("YouTube did not return visitor data")
+        }
+    }
+
+    // The part of every body that tells who is asking, in which language and from where
+    private fun contextFor(session: YouTubeSession, profile: ClientProfile = ClientProfile()): JSONObject =
+        JSONObject()
+            .put(
+                "client",
+                JSONObject()
+                    .put("clientName", profile.name)
+                    .put("clientVersion", profile.version)
+                    .put("gl", session.locale.country)
+                    .put("hl", session.locale.hl)
+                    .apply { session.visitorData?.let { put("visitorData", it) } }
+            )
+            .put("request", JSONObject().put("useSsl", true).put("internalExperimentFlags", JSONArray()))
+            .put("user", JSONObject().put("lockedSafetyMode", false))
+
+    // Posts the body and gives the text of the answer, trying again when YouTube is busy
+    private suspend fun post(url: String, session: YouTubeSession, body: String, profile: ClientProfile = ClientProfile()): String {
+        var wait = FirstDelayMillis
+        var attempt = 1
+
+        while (true) {
+            try {
+                val connection = URL(url).openConnection() as HttpURLConnection
+                try {
+                    connection.requestMethod = "POST"
+                    connection.doOutput = true
+                    connection.connectTimeout = TimeoutMillis
+                    connection.readTimeout = TimeoutMillis
+                    headersFor(session, profile).forEach { (name, value) -> connection.setRequestProperty(name, value) }
+                    connection.outputStream.use { it.write(body.toByteArray()) }
+
+                    val status = connection.responseCode
+                    if (status == HttpOk) return connection.inputStream.bufferedReader().use { it.readText() }
+                    if (status !in TransientStatus || attempt >= Attempts) {
+                        // What YouTube says about the refusal helps to tell why
+                        val reason = connection.errorStream?.bufferedReader()?.use { it.readText() }?.take(ErrorBodyMax).orEmpty()
+                        throw InnerTubeException("YouTube answered $status $reason".trim())
+                    }
+                } finally {
+                    connection.disconnect()
+                }
+            } catch (failure: InnerTubeException) {
+                throw failure
+            } catch (failure: IOException) {
+                if (attempt >= Attempts) throw failure
+            }
+
+            delay(wait)
+            wait *= 2
+            attempt++
+        }
+    }
+
+    // Text of a page
+    private fun get(url: String, locale: YouTubeLocale): String {
+        val connection = URL(url).openConnection() as HttpURLConnection
+        try {
+            connection.connectTimeout = TimeoutMillis
+            connection.readTimeout = TimeoutMillis
+            connection.setRequestProperty("User-Agent", WebUserAgent)
+            connection.setRequestProperty("Accept-Language", locale.acceptLanguage)
+            if (connection.responseCode != HttpOk) throw InnerTubeException("YouTube answered ${connection.responseCode}")
+
+            return connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    // Headers of the web player, with the cookies and the signature when the user is signed in
+    private fun headersFor(session: YouTubeSession, profile: ClientProfile = ClientProfile()): Map<String, String> {
+        val headers = linkedMapOf(
+            "Content-Type" to "application/json",
+            "Accept" to "application/json",
+            "User-Agent" to profile.userAgent,
+            "X-Goog-Api-Format-Version" to "1",
+            "X-YouTube-Client-Name" to profile.id,
+            "X-YouTube-Client-Version" to profile.version,
+            "Accept-Language" to session.locale.acceptLanguage,
+            "Cookie" to cookiesWithLocale(session.cookies, session.locale)
+        )
+        if (profile.sendOrigin) {
+            headers["Origin"] = MusicOrigin
+            headers["X-Origin"] = MusicOrigin
+            headers["Referer"] = "$MusicOrigin/"
+        }
+        if (profile.sendVisitor) session.visitorData?.let { headers["X-Goog-Visitor-Id"] = it }
+
+        val signature = session.cookies?.takeIf { it.isNotBlank() && profile.sendSignature }?.let { signatureFor(it) }
+        if (signature != null) {
+            headers["X-Goog-AuthUser"] = "0"
+            headers["Authorization"] = "SAPISIDHASH $signature"
+        }
+
+        return headers
+    }
+
+    // The visitor data sits at a fixed position of the service worker answer, after its first line
+    private fun parseWorkerVisitorData(text: String): String? =
+        JSONArray(text.substringAfter('\n').trimStart())
+            .getJSONArray(0).getJSONArray(2).getJSONArray(0).getJSONArray(0)
+            .getString(VisitorDataPosition)
+            .takeIf { it.isNotBlank() }
+}

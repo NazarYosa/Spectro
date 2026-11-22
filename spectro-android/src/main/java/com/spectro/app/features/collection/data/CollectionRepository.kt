@@ -1,0 +1,33 @@
+﻿package com.spectro.app.features.collection.data
+
+// Android context
+import android.content.Context
+// Project resources
+import com.spectro.app.core.innertube.InnerTubeClient
+import com.spectro.app.core.innertube.currentSession
+import com.spectro.app.features.home.data.PlaylistPagePrefix
+
+// What an album or a playlist page asks of YouTube Music
+class CollectionRepository(context: Context) {
+    private val appContext = context.applicationContext
+
+    // The page of an album, by its page id, or of a playlist, by its id
+    suspend fun load(kind: CollectionKind, id: String): Result<CollectionPage> {
+        val browseId = if (kind == CollectionKind.Playlist) PlaylistPagePrefix + id else id
+
+        return InnerTubeClient.browse(currentSession(appContext), browseId = browseId)
+            .mapCatching { CollectionParser.parsePage(it, kind) ?: throw IllegalStateException("The page has no header") }
+    }
+
+    // Saves the page to the library of the account, or takes it out
+    suspend fun setSaved(target: String, saved: Boolean): Result<Unit> =
+        InnerTubeClient.ratePlaylist(currentSession(appContext), target, saved).map { }
+
+    // The songs of the page in an order of YouTube Music
+    suspend fun sorted(token: String): Result<CollectionMore> =
+        InnerTubeClient.browse(currentSession(appContext), continuation = token).mapCatching(CollectionParser::parseSorted)
+
+    // The next songs of a long playlist
+    suspend fun more(continuation: String): Result<CollectionMore> =
+        InnerTubeClient.browse(currentSession(appContext), continuation = continuation).mapCatching(CollectionParser::parseMore)
+}

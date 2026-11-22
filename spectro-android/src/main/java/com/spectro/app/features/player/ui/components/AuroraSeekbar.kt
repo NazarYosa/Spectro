@@ -1,0 +1,251 @@
+﻿package com.spectro.app.features.player.ui.components
+
+// Compose animation
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+// Compose layouts and foundations
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+// Material 3 components
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+// Compose state and runtime
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+// UI styling and utilities
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.TileMode
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+// Coroutines
+import kotlinx.coroutines.launch
+// Project resources
+import com.spectro.app.R
+import com.spectro.app.core.designsystem.theme.SponsorColors
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+import com.spectro.app.core.playback.PlayerConnection
+import com.spectro.app.core.playback.SponsorMarks
+
+// Milliseconds in a second, seconds in a minute and in an hour, for the time labels
+private const val MillisPerSecond = 1000L
+private const val SecondsPerMinute = 60L
+private const val SecondsPerHour = 3600L
+
+// Seekbar of the old Spectro, a white line with a light that keeps flowing along it and the times under it
+@Composable
+fun AuroraSeekbar(
+    progress: Float,
+    durationMs: Long,
+    onSeek: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    isActive: Boolean = true,
+    timeColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    // How much the times go up toward the line
+    timesLift: Dp = PlayerDimens.None
+) {
+    val scope = rememberCoroutineScope()
+    val onMedia = SpectroTheme.colors.onMedia
+    val muted = onMedia.copy(alpha = PlayerDimens.WaveMutedAlpha)
+    val translucent = onMedia.copy(alpha = PlayerDimens.WaveTranslucentAlpha)
+    val trackColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = PlayerDimens.TrackAlpha)
+    val accentColor = SpectroTheme.colors.playerAccent
+
+    // The parts of the song that the community marked, of the kinds the user chose, drawn over the line
+    val sponsor by SponsorMarks.state.collectAsState()
+    val track by PlayerConnection.track.collectAsState()
+    val marks = if (durationMs > 0 && sponsor.videoId == track?.id) sponsor.marks else emptyList()
+
+    val position = remember { Animatable(progress) }
+    var isDragging by remember { mutableStateOf(false) }
+    var showRemaining by rememberSaveable { mutableStateOf(false) }
+
+    // Glides between the readings of the player, jumps when the gap is big
+    LaunchedEffect(progress) {
+        if (isDragging) return@LaunchedEffect
+        val gap = kotlin.math.abs(progress - position.value)
+        if (position.value == 0f || progress == 0f || gap > PlayerDimens.SeekSnapDistance) {
+            position.snapTo(progress)
+        } else {
+            position.animateTo(progress, tween(PlayerDimens.SeekGlideMillis, easing = LinearEasing))
+        }
+    }
+
+    val thumbScale by animateFloatAsState(
+        targetValue = if (isDragging) PlayerDimens.ThumbDragScale else 1f,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "ThumbScale"
+    )
+
+    // The labels change only when the second does, not on every frame of the line
+    val elapsedSeconds by remember(durationMs) {
+        derivedStateOf { (position.value * durationMs / MillisPerSecond).toLong() }
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(PlayerDimens.SeekbarHeight)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onPress = {
+                            isDragging = true
+                            tryAwaitRelease()
+                            isDragging = false
+                        }
+                    ) { offset ->
+                        val side = PlayerDimens.SeekbarSide.toPx()
+                        val target = ((offset.x - side) / (size.width - side * 2)).coerceIn(0f, 1f)
+                        scope.launch { position.snapTo(target) }
+                        onSeek(target)
+                    }
+                }
+                .pointerInput(Unit) {
+                    detectDragGestures(
+                        onDragStart = { isDragging = true },
+                        onDragEnd = { isDragging = false },
+                        onDragCancel = { isDragging = false }
+                    ) { change, _ ->
+                        change.consume()
+                        val side = PlayerDimens.SeekbarSide.toPx()
+                        val target = ((change.position.x - side) / (size.width - side * 2)).coerceIn(0f, 1f)
+                        scope.launch { position.snapTo(target) }
+                        onSeek(target)
+                    }
+                }
+        ) {
+            Canvas(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = PlayerDimens.SeekbarSide)
+                    .align(Alignment.Center)
+            ) {
+                val width = size.width
+                val centerY = size.height / 2
+                val activeWidth = width * position.value.coerceIn(0f, 1f)
+
+                drawLine(
+                    color = trackColor,
+                    start = Offset(0f, centerY),
+                    end = Offset(width, centerY),
+                    strokeWidth = PlayerDimens.SeekbarTrack.toPx(),
+                    cap = StrokeCap.Round
+                )
+
+                if (activeWidth > 0f) {
+                    drawLine(
+                        color = accentColor,
+                        start = Offset(0f, centerY),
+                        end = Offset(activeWidth, centerY),
+                        strokeWidth = PlayerDimens.SeekbarActive.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                }
+
+                marks.forEach { mark ->
+                    val start = width * (mark.startMs.toFloat() / durationMs).coerceIn(0f, 1f)
+                    val end = width * (mark.endMs.toFloat() / durationMs).coerceIn(0f, 1f)
+                    drawLine(
+                        color = SponsorColors.of(mark.category),
+                        start = Offset(start, centerY),
+                        end = Offset(maxOf(start, end), centerY),
+                        strokeWidth = PlayerDimens.SeekbarMark.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                }
+
+                val thumbCenter = Offset(activeWidth, centerY)
+                drawCircle(color = accentColor, radius = PlayerDimens.Thumb.toPx() * thumbScale, center = thumbCenter)
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .offset(y = -timesLift)
+                .fillMaxWidth()
+                .padding(horizontal = PlayerDimens.SeekbarSide),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Tapping the elapsed time switches it to the time left
+            Box(
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = { if (durationMs > 0) showRemaining = !showRemaining }
+                ),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                TimeLabel(hasDuration = durationMs > 0, alignment = Alignment.CenterStart, color = timeColor) {
+                    val totalSeconds = durationMs / MillisPerSecond
+                    if (showRemaining) "-" + formatTime(totalSeconds - elapsedSeconds) else formatTime(elapsedSeconds)
+                }
+            }
+
+            TimeLabel(hasDuration = durationMs > 0, alignment = Alignment.CenterEnd, color = timeColor) {
+                formatTime(durationMs / MillisPerSecond)
+            }
+        }
+    }
+}
+
+// Time under the seekbar
+@Composable
+private fun TimeLabel(
+    hasDuration: Boolean,
+    alignment: Alignment,
+    color: Color,
+    text: () -> String
+) {
+    val unknown = stringResource(R.string.player_time_unknown)
+    val style = MaterialTheme.typography.bodyMedium.copy(fontSize = PlayerDimens.TimeTextSize, fontWeight = FontWeight.Medium)
+
+    Text(
+        text = if (hasDuration) text() else unknown,
+        color = color,
+        style = style
+    )
+}
+
+// Seconds written as minutes and seconds
+internal fun formatTime(totalSeconds: Long): String {
+    val seconds = totalSeconds.coerceAtLeast(0)
+    val hours = seconds / SecondsPerHour
+    if (hours > 0) return "%d:%02d:%02d".format(hours, seconds % SecondsPerHour / SecondsPerMinute, seconds % SecondsPerMinute)
+
+    return "%d:%02d".format(seconds / SecondsPerMinute, seconds % SecondsPerMinute)
+}

@@ -1,0 +1,671 @@
+package com.spectro.app.core.playback
+
+// Android context and components
+import android.content.ComponentName
+import android.content.Context
+import android.os.Bundle
+// Android utilities
+import com.spectro.app.R
+import com.spectro.app.core.designsystem.components.Toasts
+import com.spectro.app.core.radio.RadioIdPrefix
+import com.spectro.app.core.radio.RadioStation
+import com.spectro.app.core.radio.RadioStream
+import com.spectro.app.core.radio.isRadioTrack
+import androidx.annotation.OptIn
+import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
+// Media3 items, player and controller
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+// Concurrency and reactive flows
+import com.google.common.util.concurrent.ListenableFuture
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+// A song or an episode the player can open, the id is its video
+// The key that keeps the address of the picture on the internet in the details of an item, whose own picture may be a file of the downloads
+const val RemoteArtworkKey = "remoteArtwork"
+
+data class PlayableTrack(
+    val id: String,
+    val title: String,
+    val artist: String?,
+    val artworkUrl: String?,
+    val durationMs: Long = 0L,
+    val isVideo: Boolean = false,
+    // True when YouTube Music marks the song as explicit
+    val isExplicit: Boolean = false
+)
+
+// A song of the queue and its place in the player
+data class QueueEntry(
+    val track: PlayableTrack,
+    val index: Int
+)
+
+// What the user asks the player to do, which a room can take over so the host decides
+sealed interface ControlAction {
+    data class PlayPause(val shouldPlay: Boolean) : ControlAction
+    data class Seek(val fraction: Float) : ControlAction
+    data object Next : ControlAction
+    data object Previous : ControlAction
+    data class PlayTrack(val track: PlayableTrack) : ControlAction
+    data class Enqueue(val tracks: List<PlayableTrack>, val afterCurrent: Boolean) : ControlAction
+
+    // Something only the host can do
+    data object Blocked : ControlAction
+}
+
+// Takes an action away from the player, true when it took it
+fun interface ControlGate {
+    fun intercept(action: ControlAction): Boolean
+}
+
+// Repeat modes, in the order a tap goes through them
+enum class RepeatMode { Off, All, One }
+
+// The radio that feeds the queue, with the page to ask next
+private data class RadioState(
+    val appContext: Context,
+    val videoId: String,
+    val playlistId: String,
+    val continuation: String?
+)
+
+// Songs left after the current one when the next page of the radio is asked
+private const val LoadMoreMargin = 5
+
+// How many songs the queue should have after the current one when the radio starts, and how many more pages are asked to get there
+private const val RadioFillTarget = 49
+private const val RadioFillPages = 6
+
+// How often the radio checks that the song started, and how long it waits at most before it goes on anyway
+private const val RadioPollMillis = 100L
+private const val RadioMaxWaitMillis = 15_000L
+
+// The mark the controller of the app has in its connection, which tells it apart from the notification, the lock screen and the headset
+const val AppControllerKey = "spectro_app_controller"
+
+// The way the screens talk to the playback service, and what it is playing for them to show
+object PlayerConnection {
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var controller: MediaController? = null
+
+    private val mutableTrack = MutableStateFlow<PlayableTrack?>(null)
+    private val mutableIsPlaying = MutableStateFlow(false)
+    private val mutableIsLoading = MutableStateFlow(false)
+    private val mutableRepeat = MutableStateFlow(RepeatMode.Off)
+    private val mutableShuffle = MutableStateFlow(false)
+    private val mutableQueue = MutableStateFlow<List<QueueEntry>>(emptyList())
+    private val mutableCurrentIndex = MutableStateFlow(0)
+    private val mutableIsLoadingMore = MutableStateFlow(false)
+
+    private val scope = MainScope()
+    private var radio: RadioState? = null
+    private var appContext: Context? = null
+
+    // Optional gate to intercept playback actions
+    var controlGate: ControlGate? = null
+
+    private fun isTaken(action: ControlAction): Boolean = controlGate?.intercept(action) == true
+    private var radioJob: Job? = null
+
+    // What is loaded in the player, empty when nothing is
+    val track: StateFlow<PlayableTrack?> = mutableTrack.asStateFlow()
+
+    // True while the sound is coming out
+    val isPlaying: StateFlow<Boolean> = mutableIsPlaying.asStateFlow()
+
+    // True while the player waits for the audio it was asked to play
+    val isLoading: StateFlow<Boolean> = mutableIsLoading.asStateFlow()
+
+    // Repeat mode of the player
+    val repeat: StateFlow<RepeatMode> = mutableRepeat.asStateFlow()
+
+    // True when the order of the queue is shuffled
+    val shuffle: StateFlow<Boolean> = mutableShuffle.asStateFlow()
+
+    // Songs of the queue in the order they play
+    val queue: StateFlow<List<QueueEntry>> = mutableQueue.asStateFlow()
+
+    // Place in the player of the song that is loaded
+    val currentIndex: StateFlow<Int> = mutableCurrentIndex.asStateFlow()
+
+    // True while the next page of the radio is on its way
+    val isLoadingMore: StateFlow<Boolean> = mutableIsLoadingMore.asStateFlow()
+
+    // Tells when the user or a room jumped to another place of the song
+    private val mutableSeeks = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val seeks: SharedFlow<Unit> = mutableSeeks.asSharedFlow()
+
+    // True when the player is meant to play, which stays true while it waits for the audio, unlike the sound coming out
+    val wantsToPlay: Boolean
+        get() = controller?.playWhenReady == true
+
+    // Where the song is in milliseconds, read when it is needed
+    val positionMs: Long
+        get() = controller?.currentPosition ?: 0L
+
+    // Length of the song in milliseconds, zero while it is not known
+    val durationMs: Long
+        get() = controller?.duration?.takeIf { it != C.TIME_UNSET && it > 0 } ?: 0L
+
+    // Share of the song already played, read when it is drawn instead of being pushed to the screens
+    val progress: Float
+        get() {
+            val player = controller ?: return 0f
+            val duration = player.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: return 0f
+            return (player.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
+        }
+
+    // Connects to the service when the app opens, so a song that kept playing shows up again
+    fun connect(context: Context) {
+        withController(context) {}
+    }
+
+    // Replaces what is playing with this track and starts it, then fills the queue with its radio
+    fun play(context: Context, track: PlayableTrack) {
+        if (isTaken(ControlAction.PlayTrack(track))) return
+        val appContext = context.applicationContext
+        withController(context) { player ->
+            player.setMediaItem(track.toMediaItem(context))
+            player.prepare()
+            player.play()
+
+            radio = null
+            radioJob?.cancel()
+            radioJob = scope.launch {
+                // The radio waits for the first sound, so its requests and the change of the queue never compete with the opening of the song
+                var waited = 0L
+                while ((!player.isPlaying || player.currentMediaItem?.mediaId != track.id) && waited < RadioMaxWaitMillis) {
+                    delay(RadioPollMillis)
+                    waited += RadioPollMillis
+                }
+
+                RadioQueue.start(appContext, track.id).onSuccess { page ->
+                    // Another song may have been chosen while the radio was on its way
+                    if (controller?.currentMediaItem?.mediaId != track.id) return@onSuccess
+                    player.addMediaItems(page.tracks.filter { it.id != track.id }.distinctBy { it.id }.map { it.toMediaItem(context) })
+                    radio = RadioState(appContext, track.id, page.playlistId, page.continuation)
+                }
+
+                // The filters of videos and of explicit songs can leave a page almost empty, so the next pages are asked until the queue has enough songs
+                var pages = 0
+                while (pages < RadioFillPages && radio != null && player.mediaItemCount - player.currentMediaItemIndex <= RadioFillTarget) {
+                    if (controller?.currentMediaItem?.mediaId != track.id) break
+                    loadMoreNow()
+                    pages++
+                }
+            }
+        }
+    }
+
+    // Replaces what is playing with a list of songs, from the one at the start place, in the order of the list or shuffled when asked
+    // The list is all there is, the radio does not add songs to it
+    fun playAll(context: Context, tracks: List<PlayableTrack>, startIndex: Int = 0, shuffle: Boolean? = null) {
+        if (tracks.isEmpty()) return
+        if (isTaken(ControlAction.PlayTrack(tracks[startIndex.coerceIn(tracks.indices)]))) return
+
+        withController(context) { player ->
+            radio = null
+            radioJob?.cancel()
+
+            shuffle?.let { player.shuffleModeEnabled = it }
+            player.setMediaItems(tracks.map { it.toMediaItem(context) }, startIndex.coerceIn(tracks.indices), 0L)
+            player.prepare()
+            player.play()
+        }
+    }
+
+    // Opens the songs a room is playing, from the first one at this place and playing or paused as the host is, without the radio filling the queue
+    fun playShared(context: Context, tracks: List<PlayableTrack>, positionMs: Long, isPlaying: Boolean) {
+        if (tracks.isEmpty()) return
+
+        withController(context) { player ->
+            radio = null
+            radioJob?.cancel()
+
+            player.setMediaItems(tracks.map { it.toMediaItem(context) }, 0, positionMs.coerceAtLeast(0L))
+            player.prepare()
+            player.playWhenReady = isPlaying
+        }
+    }
+
+    // Plays a station, its sound has no end, so there is no queue to go through and no radio of songs to fill
+    fun playStation(context: Context, station: RadioStation, stream: RadioStream) {
+        if (isTaken(ControlAction.Blocked)) return
+
+        withController(context) { player ->
+            radio = null
+            radioJob?.cancel()
+
+            player.setMediaItem(station.toMediaItem(stream))
+            player.prepare()
+            player.play()
+        }
+    }
+
+    // Plays or pauses to match a room
+    fun setPlaying(isPlaying: Boolean) {
+        controller?.playWhenReady = isPlaying
+    }
+
+    // Jumps to a place of the song in milliseconds
+    fun seekToMs(positionMs: Long) {
+        controller?.seekTo(positionMs.coerceAtLeast(0L))
+    }
+
+    // Puts several songs after the one that plays or at the end of the queue, the ones already in the queue stay where they are
+    fun enqueueAll(context: Context, tracks: List<PlayableTrack>, afterCurrent: Boolean) {
+        if (tracks.isEmpty()) return
+        if (isTaken(ControlAction.Enqueue(tracks, afterCurrent))) return
+
+        withController(context) { player ->
+            if (player.mediaItemCount == 0) {
+                playAll(context, tracks)
+                return@withController
+            }
+
+            val known = (0 until player.mediaItemCount).mapTo(HashSet()) { player.getMediaItemAt(it).mediaId }
+            val items = tracks.filter { known.add(it.id) }.map { it.toMediaItem(context) }
+            if (afterCurrent) player.addMediaItems(player.currentMediaItemIndex + 1, items) else player.addMediaItems(items)
+        }
+    }
+
+    // Puts a song to play right after the one that plays, a song that is already in the queue is moved instead of repeated
+    // True when it was done, false when a room took it to ask the host
+    fun playNextTrack(context: Context, track: PlayableTrack): Boolean {
+        if (isTaken(ControlAction.Enqueue(listOf(track), afterCurrent = true))) return false
+        enqueue(context, track, afterCurrent = true)
+        return true
+    }
+
+    // Puts a song at the end of the queue, a song that is already in the queue is moved to the end instead of repeated
+    fun addTrackToQueue(context: Context, track: PlayableTrack): Boolean {
+        if (isTaken(ControlAction.Enqueue(listOf(track), afterCurrent = false))) return false
+        enqueue(context, track, afterCurrent = false)
+        return true
+    }
+
+    // Nothing is loaded yet, so the song simply plays
+    private fun enqueue(context: Context, track: PlayableTrack, afterCurrent: Boolean) {
+        withController(context) { player ->
+            if (player.mediaItemCount == 0) {
+                play(context, track)
+                return@withController
+            }
+
+            val current = player.currentMediaItemIndex
+            val existing = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == track.id }
+
+            when {
+                // The song that plays is already where it should be
+                existing == current -> Unit
+                existing != null -> player.moveMediaItem(existing, if (afterCurrent) (if (existing < current) current else current + 1) else player.mediaItemCount - 1)
+                afterCurrent -> player.addMediaItem(current + 1, track.toMediaItem(context))
+                else -> player.addMediaItem(track.toMediaItem(context))
+            }
+        }
+    }
+
+    // Asks the next page of the radio and adds the songs that are not in the queue yet
+    fun loadMore() {
+        scope.launch { loadMoreNow() }
+    }
+
+    // The same, and it waits for the answer
+    // A radio that ended or brought nothing new starts again from the last song of the queue, so it never runs dry on the first one
+    private suspend fun loadMoreNow() {
+        val state = radio ?: run {
+            val ctx = appContext ?: return
+            val lastId = lastSong("") ?: return
+            RadioState(ctx, lastId, RadioPrefix + lastId, null).also { radio = it }
+        }
+        if (mutableIsLoadingMore.value) return
+
+        mutableIsLoadingMore.value = true
+        val continuation = state.continuation
+        val seed = if (continuation == null) lastSong(state.videoId) else null
+        val result = when {
+            continuation != null -> RadioQueue.more(state.appContext, state.videoId, state.playlistId, continuation)
+            seed != null -> RadioQueue.start(state.appContext, seed)
+            else -> null
+        }
+        if (result == null) radio = null
+
+        result?.onSuccess { page ->
+            val player = controller
+            if (player == null || radio !== state) return@onSuccess
+            val known = (0 until player.mediaItemCount).mapTo(HashSet()) { player.getMediaItemAt(it).mediaId }
+            val fresh = page.tracks.filter { known.add(it.id) }
+            player.addMediaItems(fresh.map { it.toMediaItem(state.appContext) })
+            radio = when {
+                seed != null && fresh.isEmpty() -> {
+                    val nextSeed = lastSong("")
+                    if (nextSeed != null) RadioState(state.appContext, nextSeed, page.playlistId, null) else null
+                }
+                seed != null -> RadioState(state.appContext, seed, page.playlistId, page.continuation)
+                fresh.isEmpty() -> {
+                    val nextSeed = lastSong("")
+                    if (nextSeed != null) RadioState(state.appContext, nextSeed, page.playlistId, null) else state.copy(continuation = null)
+                }
+                else -> state.copy(continuation = page.continuation)
+            }
+        }
+        mutableIsLoadingMore.value = false
+    }
+
+    // The last song of the queue that is not a video, other than the one the radio came from
+    private fun lastSong(except: String): String? {
+        val player = controller ?: return null
+        return (player.mediaItemCount - 1 downTo 0).map { player.getMediaItemAt(it) }
+            .firstOrNull { it.mediaId != except && it.mediaMetadata.mediaType != MediaMetadata.MEDIA_TYPE_VIDEO }?.mediaId
+    }
+
+    // Plays the song at this place of the player and renews the radio queue for that track (YouTube Music style)
+    fun playAt(index: Int) {
+        val player = controller?.takeIf { index in 0 until it.mediaItemCount } ?: return
+        val currentItem = player.getMediaItemAt(index)
+        val track = currentItem.toPlayableTrack()
+        if (isTaken(ControlAction.PlayTrack(track))) return
+
+        player.seekTo(index, 0L)
+        player.play()
+
+        // YouTube Music Queue Behavior:
+        // Clear upcoming items after index, and dynamically extend the queue with fresh 1-genre recommendations
+        if (player.mediaItemCount > index + 1) {
+            player.removeMediaItems(index + 1, player.mediaItemCount)
+        }
+
+        val ctx = appContext ?: return
+        radio = null
+        radioJob?.cancel()
+        radioJob = scope.launch {
+            RadioQueue.start(ctx, track.id).onSuccess { page ->
+                if (controller?.currentMediaItem?.mediaId != track.id) return@onSuccess
+                val known = (0 until player.mediaItemCount).mapTo(HashSet()) { player.getMediaItemAt(it).mediaId }
+                val fresh = page.tracks.filter { !known.contains(it.id) && it.id != track.id }.distinctBy { it.id }
+                player.addMediaItems(fresh.map { it.toMediaItem(ctx) })
+                radio = RadioState(ctx, track.id, page.playlistId, page.continuation)
+            }
+
+            var pages = 0
+            while (pages < RadioFillPages && radio != null && player.mediaItemCount - player.currentMediaItemIndex <= RadioFillTarget) {
+                if (controller?.currentMediaItem?.mediaId != track.id) break
+                loadMoreNow()
+                pages++
+            }
+        }
+    }
+
+    // Takes the song at this place out of the queue
+    fun remove(index: Int) {
+        if (isTaken(ControlAction.Blocked)) return
+        controller?.takeIf { index in 0 until it.mediaItemCount }?.removeMediaItem(index)
+    }
+
+    // Moves the song at this place to play right after the current one
+    fun playNext(index: Int) {
+        if (isTaken(ControlAction.Blocked)) return
+        val player = controller?.takeIf { index in 0 until it.mediaItemCount } ?: return
+        val current = player.currentMediaItemIndex
+        if (index == current) return
+        player.moveMediaItem(index, if (index < current) current else current + 1)
+    }
+
+    // Takes several songs out of the queue, the one that plays stays, they are found by their ids so no place can be out of date
+    fun removeAll(ids: Set<String>) {
+        if (isTaken(ControlAction.Blocked)) return
+        val player = controller ?: return
+        val current = player.currentMediaItemIndex
+        // From the end, so the places of the ones still to remove do not move
+        for (index in player.mediaItemCount - 1 downTo 0) {
+            if (index != current && player.getMediaItemAt(index).mediaId in ids) player.removeMediaItem(index)
+        }
+    }
+
+    // Moves several songs to play right after the one that plays, one after the other in the order they have in the queue
+    fun playNextAll(ids: Set<String>) {
+        if (isTaken(ControlAction.Blocked)) return
+        val player = controller ?: return
+        val ordered = (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId }.filter { it in ids }
+        var moved = 0
+
+        for (id in ordered) {
+            val from = (0 until player.mediaItemCount).firstOrNull { player.getMediaItemAt(it).mediaId == id } ?: continue
+            val current = player.currentMediaItemIndex
+            if (from == current) continue
+
+            // A song from before the one that plays leaves a gap behind it, so it lands one place earlier
+            player.moveMediaItem(from, if (from < current) current + moved else current + 1 + moved)
+            moved++
+        }
+    }
+
+    // Moves a song from one place of the queue to another, places that do not exist are ignored
+    fun move(from: Int, to: Int) {
+        if (isTaken(ControlAction.Blocked)) return
+        val player = controller ?: return
+        val count = player.mediaItemCount
+        if (from != to && from in 0 until count && to in 0 until count) player.moveMediaItem(from, to)
+    }
+
+    // Pauses what plays and plays what is paused
+    fun togglePlayPause() {
+        val player = controller ?: return
+        if (isTaken(ControlAction.PlayPause(!player.isPlaying))) return
+        if (player.isPlaying) player.pause() else player.play()
+    }
+
+    // Jumps to a share of the song
+    fun seekTo(fraction: Float) {
+        val duration = durationMs.takeIf { it > 0 } ?: return
+        if (isTaken(ControlAction.Seek(fraction))) return
+        controller?.seekTo((duration * fraction.coerceIn(0f, 1f)).toLong())
+    }
+
+    // Goes from no repeat to repeat all, then to repeat one, then back
+    fun toggleRepeat() {
+        val player = controller ?: return
+        if (isTaken(ControlAction.Blocked)) return
+        player.repeatMode = when (player.repeatMode) {
+            Player.REPEAT_MODE_OFF -> Player.REPEAT_MODE_ALL
+            Player.REPEAT_MODE_ALL -> Player.REPEAT_MODE_ONE
+            else -> Player.REPEAT_MODE_OFF
+        }
+    }
+
+    // Turns the shuffled order on or off
+    fun toggleShuffle() {
+        val player = controller ?: return
+        if (isTaken(ControlAction.Blocked)) return
+        player.shuffleModeEnabled = !player.shuffleModeEnabled
+    }
+
+    // Goes to the next item when there is one
+    fun skipToNext() {
+        if (isTaken(ControlAction.Next)) return
+        controller?.takeIf { it.hasNextMediaItem() }?.seekToNextMediaItem()
+    }
+
+    // Goes back, the song starts again or the one that came before plays as many taps as the user chose in the settings, which the player of the service decides
+    fun skipToPrevious() {
+        val player = controller ?: return
+        if (isTaken(ControlAction.Previous)) return
+        // A live sound has no start to go back to
+        if (isRadioTrack(player.currentMediaItem?.mediaId)) return
+        player.seekToPrevious()
+    }
+
+    // Stops and empties the player, which closes the notification
+    fun stop() {
+        radio = null
+        radioJob?.cancel()
+        controller?.run {
+            stop()
+            clearMediaItems()
+        }
+    }
+
+    // Runs an action once the controller is connected to the service
+    private fun withController(context: Context, action: (MediaController) -> Unit) {
+        val appContext = context.applicationContext
+        this.appContext = appContext
+        val future = controllerFuture ?: MediaController.Builder(
+            appContext,
+            SessionToken(appContext, ComponentName(appContext, PlaybackService::class.java))
+        ).setConnectionHints(Bundle().apply { putBoolean(AppControllerKey, true) }).buildAsync().also { controllerFuture = it }
+
+        future.addListener(
+            {
+                // A connection that failed is forgotten, so the next call tries again
+                runCatching { future.get() }
+                    .onSuccess { player ->
+                        if (controller !== player) attach(player)
+                        action(player)
+                    }
+                    .onFailure { controllerFuture = null }
+            },
+            ContextCompat.getMainExecutor(appContext)
+        )
+    }
+
+    // Follows the player of the service
+    private fun attach(player: MediaController) {
+        controller = player
+        player.addListener(object : Player.Listener {
+            // A station that the player could not open says so, the sound of a song is looked after elsewhere
+            override fun onPlayerError(error: PlaybackException) {
+                if (!isRadioTrack(player.currentMediaItem?.mediaId)) return
+                appContext?.let { Toasts.show(it.getString(R.string.radios_play_failed), subtitle = error.errorCodeName, isError = true) }
+            }
+
+            override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+                if (reason == Player.DISCONTINUITY_REASON_SEEK) mutableSeeks.tryEmit(Unit)
+            }
+
+            override fun onEvents(player: Player, events: Player.Events) {
+                sync(player)
+                if (events.containsAny(Player.EVENT_TIMELINE_CHANGED, Player.EVENT_SHUFFLE_MODE_ENABLED_CHANGED)) syncQueue(player)
+
+                // A player that was emptied, such as by the service when the app left the recent apps, has no radio to go on with
+                // Near the end of the queue the radio brings more songs
+                if (player.mediaItemCount == 0) {
+                    radio = null
+                    radioJob?.cancel()
+                } else if (events.contains(Player.EVENT_MEDIA_ITEM_TRANSITION) &&
+                    player.mediaItemCount - player.currentMediaItemIndex <= LoadMoreMargin
+                ) {
+                    loadMore()
+                }
+            }
+        })
+        sync(player)
+        syncQueue(player)
+    }
+
+    // Copies the songs of the player to the queue, in the order they play
+    private fun syncQueue(player: Player) {
+        val timeline = player.currentTimeline
+        val shuffled = player.shuffleModeEnabled
+        val entries = mutableListOf<QueueEntry>()
+        var index = if (timeline.isEmpty) C.INDEX_UNSET else timeline.getFirstWindowIndex(shuffled)
+        while (index != C.INDEX_UNSET) {
+            entries += QueueEntry(player.getMediaItemAt(index).toPlayableTrack(), index)
+            index = timeline.getNextWindowIndex(index, Player.REPEAT_MODE_OFF, shuffled)
+        }
+        mutableQueue.value = entries
+    }
+
+    // Copies the state of the player to the flows the screens read
+    private fun sync(player: Player) {
+        mutableTrack.value = player.currentMediaItem?.toPlayableTrack()
+        mutableIsPlaying.value = player.isPlaying
+        mutableIsLoading.value = player.playWhenReady && player.playbackState == Player.STATE_BUFFERING
+        mutableRepeat.value = when (player.repeatMode) {
+            Player.REPEAT_MODE_ALL -> RepeatMode.All
+            Player.REPEAT_MODE_ONE -> RepeatMode.One
+            else -> RepeatMode.Off
+        }
+        mutableShuffle.value = player.shuffleModeEnabled
+        mutableCurrentIndex.value = player.currentMediaItemIndex
+    }
+
+    // The id is also the key the service asks the link with, the details show on the notification
+    @OptIn(UnstableApi::class)
+    internal fun PlayableTrack.toMediaItem(context: Context): MediaItem =
+        MediaItem.Builder()
+            .setMediaId(id)
+            .setUri(id)
+            .setCustomCacheKey(id)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(title)
+                    .setDisplayTitle(title)
+                    .setArtist(artist)
+                    .setSubtitle(artist)
+                    .setArtworkUri(artworkUrl?.toUri())
+                    .setExtras(Bundle().apply {
+                        putString(RemoteArtworkKey, artworkUrl)
+                        putLong("track_duration_ms", durationMs)
+                    })
+                    .setMediaType(if (isVideo) MediaMetadata.MEDIA_TYPE_VIDEO else MediaMetadata.MEDIA_TYPE_MUSIC)
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .build()
+            )
+            .build()
+
+    // A station as an item the player can open, from the address of its sound
+    @OptIn(UnstableApi::class)
+    internal fun RadioStation.toMediaItem(stream: RadioStream): MediaItem {
+        val mediaId = RadioIdPrefix + id
+
+        return MediaItem.Builder()
+            .setMediaId(mediaId)
+            .setUri(stream.url)
+            .setCustomCacheKey(mediaId)
+            .apply { if (stream.isHls) setMimeType(MimeTypes.APPLICATION_M3U8) }
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(name)
+                    .setDisplayTitle(name)
+                    .setArtist(place)
+                    .setSubtitle(place)
+                    .setArtworkUri(largeLogoUrl?.toUri())
+                    .setExtras(Bundle().apply { putString(RemoteArtworkKey, largeLogoUrl) })
+                    .setMediaType(MediaMetadata.MEDIA_TYPE_RADIO_STATION)
+                    .setIsBrowsable(false)
+                    .setIsPlayable(true)
+                    .build()
+            )
+            .build()
+    }
+
+    // A loaded item back as a track
+    internal fun MediaItem.toPlayableTrack(): PlayableTrack =
+        PlayableTrack(
+            id = mediaId,
+            title = mediaMetadata.title?.toString().orEmpty(),
+            artist = mediaMetadata.artist?.toString(),
+            artworkUrl = mediaMetadata.extras?.getString(RemoteArtworkKey) ?: mediaMetadata.artworkUri?.toString(),
+            durationMs = mediaMetadata.extras?.getLong("track_duration_ms")?.takeIf { it > 0 } ?: (mediaMetadata.durationMs ?: 0L),
+            isVideo = mediaMetadata.mediaType == MediaMetadata.MEDIA_TYPE_VIDEO
+        )
+}

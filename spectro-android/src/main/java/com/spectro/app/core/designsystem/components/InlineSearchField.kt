@@ -1,0 +1,112 @@
+﻿package com.spectro.app.core.designsystem.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.unit.dp
+import com.spectro.app.R
+import com.spectro.app.core.designsystem.icons.SpectroIcons
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+
+@Composable
+fun InlineSearchField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    hint: String = stringResource(R.string.search_hint),
+    progress: Float = 1f
+) {
+    val focus = remember { FocusRequester() }
+    val container = SpectroTheme.colors.chip
+    val interactionSource = remember { MutableInteractionSource() }
+
+    LaunchedEffect(Unit) { focus.requestFocus() }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.background.copy(alpha = progress))
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal))
+            .padding(PaddingValues(horizontal = 16.dp, vertical = 6.dp))
+    ) {
+        Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+            BasicTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier
+                    .fillMaxWidth(progress)
+                    .height(44.dp)
+                    .clipToBounds()
+                    .alpha((progress / 0.3f).coerceIn(0f, 1f))
+                    .focusRequester(focus),
+                textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { }),
+                interactionSource = interactionSource,
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
+            ) { innerTextField ->
+                TextFieldDefaults.DecorationBox(
+                    value = query,
+                    innerTextField = innerTextField,
+                    enabled = true,
+                    singleLine = true,
+                    visualTransformation = VisualTransformation.None,
+                    interactionSource = interactionSource,
+                    placeholder = { Text(text = hint, style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false) },
+                    leadingIcon = { Icon(imageVector = SpectroIcons.Search, contentDescription = null) },
+                    shape = CircleShape,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = container,
+                        unfocusedContainerColor = container,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent
+                    ),
+                    contentPadding = TextFieldDefaults.contentPaddingWithoutLabel(top = 0.dp, bottom = 0.dp)
+                )
+            }
+        }
+
+        IconButton(onClick = onClose, modifier = Modifier.alpha(progress)) {
+            Icon(
+                imageVector = SpectroIcons.Close,
+                contentDescription = stringResource(R.string.cd_close),
+                tint = MaterialTheme.colorScheme.onBackground
+            )
+        }
+    }
+}

@@ -1,0 +1,43 @@
+﻿package com.spectro.app.features.library.data
+
+// Android context and DataStore
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import org.json.JSONObject
+import androidx.datastore.preferences.preferencesDataStore
+// Coroutines and reactive flows
+import kotlinx.coroutines.flow.first
+
+// DataStore file and keys for the last choice of the library
+private val Context.libraryDataStore: DataStore<Preferences> by preferencesDataStore(name = "library")
+private val GroupKey = stringPreferencesKey("group")
+private val SourceKey = stringPreferencesKey("source")
+private const val SortKeyPrefix = "sort_"
+
+// Remembers the button and the list that were on, so the library opens the same way next time
+class LibraryStore(context: Context) {
+    private val dataStore = context.applicationContext.libraryDataStore
+
+    // The names of the button and of the list, empty when none was chosen
+    suspend fun read(): Pair<String?, String?> {
+        val preferences = dataStore.data.first()
+        return preferences[GroupKey] to preferences[SourceKey]
+    }
+
+    // The order that was chosen for a list, kept under the name of the list, written as local or remote followed by its name
+    suspend fun readSort(key: String): String? = dataStore.data.first()[stringPreferencesKey(SortKeyPrefix + key)]
+
+    suspend fun saveSort(key: String, sort: String) {
+        dataStore.edit { preferences -> preferences[stringPreferencesKey(SortKeyPrefix + key)] = sort }
+    }
+
+    suspend fun save(group: String?, source: String?) {
+        dataStore.edit { preferences ->
+            if (group == null) preferences.remove(GroupKey) else preferences[GroupKey] = group
+            if (source == null) preferences.remove(SourceKey) else preferences[SourceKey] = source
+        }
+    }
+}

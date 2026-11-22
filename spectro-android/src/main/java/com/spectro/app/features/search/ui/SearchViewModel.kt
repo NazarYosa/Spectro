@@ -1,0 +1,340 @@
+﻿package com.spectro.app.features.search.ui
+
+// Android application and view model
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+// Coroutines and reactive flows
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+// Project resources
+import com.spectro.app.core.navigation.ItemNavigator
+import com.spectro.app.core.navigation.MainTab
+import com.spectro.app.features.settings.data.PrivacyPrefs
+import com.spectro.app.core.history.PlayHistory
+import com.spectro.app.features.home.data.HomeItem
+import com.spectro.app.features.home.data.HomeItemKind
+import com.spectro.app.features.home.ui.components.isVideo
+import com.spectro.app.features.search.data.SearchCategory
+import com.spectro.app.features.search.data.SearchRepository
+import com.spectro.app.features.search.data.SearchSuggestion
+
+// What the results are doing, nothing asked, waiting for the answer, showing it or failed
+enum class SearchStatus { Idle, Loading, Content, Error }
+
+// Everything the search screen draws
+data class SearchUiState(
+    // What is in the field, and the words the results shown are for, empty while the user is still typing
+    val query: String = "",
+    val submitted: String? = null,
+    val category: SearchCategory = SearchCategory.All,
+    val suggestions: List<SearchSuggestion> = emptyList(),
+    val isSuggesting: Boolean = false,
+    val status: SearchStatus = SearchStatus.Idle,
+    val topMatch: HomeItem? = null,
+    // The video that was the best result, shown under the song of it that took its place
+    val secondMatch: HomeItem? = null,
+    val items: List<HomeItem> = emptyList(),
+    val continuation: String? = null,
+    val isLoadingMore: Boolean = false,
+    // The searches made before, the most recent first
+    val history: List<String> = emptyList(),
+    // Searches that may please the user, shown under the history
+    val suggested: List<String> = emptyList(),
+    // True while the history and the suggestions are asked again after a pull down
+    val isRefreshing: Boolean = false
+)
+
+// What joins the artists of a song in its text, such as a comma, an ampersand or the word and
+private val ArtistSeparator = Regex("\\s*(?:,|&|\\be\\b|\\band\\b)\\s*")
+
+// Follows what is typed, asks for the words under the field and the results, and keeps the searches that were made
+class SearchViewModel(application: Application) : AndroidViewModel(application) {
+    private val repository = SearchRepository(application)
+    private val mutableState = MutableStateFlow(SearchUiState())
+    val state: StateFlow<SearchUiState> = mutableState.asStateFlow()
+
+    // The requests that are running, so a new one replaces them
+    private var suggestionsJob: Job? = null
+    private var searchJob: Job? = null
+    private var moreJob: Job? = null
+
+    // The searches kept on the device and the ones kept by the account, the history shows both
+    private var localHistory: List<String> = emptyList()
+    private var accountHistory: List<SearchSuggestion.Words> = emptyList()
+
+    // True once the account answered, from then on it is the one that says what the history is
+    private var followsAccount = false
+
+    // False until the account first answers, the history waits for it so the one of the device does not show for a moment before it
+    private var hasAnswered = false
+
+    // True when the tab was left for another one, the empty search comes back when the tab is drawn again, so it leaves looking as it was
+    private var wasLeft = false
+
+    // True when the search came from a song found by its sound, its song goes before its video at the top
+    private var prefersSong = false
+
+    // Everything that may be suggested, the ones the history already has are taken out when it is shown
+    private var suggestedAll: List<String> = emptyList()
+
+    init {
+        viewModelScope.launch {
+            PlayHistory.searches(application, SearchDimens.HistoryLimit).collect { searches ->
+                localHistory = searches
+                publishHistory()
+            }
+        }
+        refreshAccountHistory()
+        loadSuggested()
+
+        // Leaving the tab for another one brings back the empty search, as the other tabs come back to their first screen
+        viewModelScope.launch {
+            ItemNavigator.tabLeft.filter { it == MainTab.EXPLORE.route }.collect { wasLeft = true }
+        }
+    }
+
+    // What the account suggests, then the artists followed and the ones listened to the most, as words to search
+    private fun loadSuggested(): Job =
+        viewModelScope.launch {
+            val application = getApplication<Application>()
+            val fromAccount = repository.suggestedSearches()
+            val followed = PlayHistory.followedArtistNames(application)
+            val listened = PlayHistory.topArtistTexts(application, SearchDimens.SuggestedTopArtists)
+                .flatMap { text -> text.split(ArtistSeparator).map { it.trim() } }
+
+            suggestedAll = (fromAccount + followed + listened).filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+            publishHistory()
+        }
+
+    // Asks the account for its searches and for what it suggests again, with the mark of the pull down while it waits
+    fun refresh() {
+        if (mutableState.value.isRefreshing) return
+
+        mutableState.update { it.copy(isRefreshing = true) }
+        viewModelScope.launch {
+            joinAll(refreshAccountHistory(), loadSuggested())
+            mutableState.update { it.copy(isRefreshing = false) }
+        }
+    }
+
+    // The text of the field changed, leaving the results and asking for the words that complete it
+    fun onQueryChange(text: String) {
+        mutableState.update { it.copy(query = text, submitted = null) }
+        suggest(text)
+    }
+
+    // The field was touched while the results were shown, so the words come back
+    fun openSuggestions() {
+        val query = mutableState.value.query
+        mutableState.update { it.copy(submitted = null) }
+        suggest(query)
+    }
+
+    // Searches for the words, keeps them in the history and shows the results of everything
+    // With prefersSong, when the best result is a video, the song of it goes first and the video under it
+    fun submit(text: String, prefersSong: Boolean = false) {
+        val query = text.trim()
+        if (query.isEmpty()) return
+
+        this.prefersSong = prefersSong
+        suggestionsJob?.cancel()
+        if (!PrivacyPrefs.pauseSearchHistory) viewModelScope.launch(Dispatchers.IO) { PlayHistory.saveSearch(getApplication(), query) }
+        mutableState.update { it.copy(query = query, submitted = query, suggestions = emptyList(), isSuggesting = false) }
+        load(query, SearchCategory.All)
+    }
+
+    // Shows only one kind of result, the same search under another filter
+    fun selectCategory(category: SearchCategory) {
+        val query = mutableState.value.submitted ?: return
+        if (category == mutableState.value.category) return
+
+        load(query, category)
+    }
+
+    // Asks the same search again after a failure
+    fun retry() {
+        val state = mutableState.value
+        state.submitted?.let { load(it, state.category) }
+    }
+
+    // Adds the next page of a filter, called when the list gets close to its end, the search of everything has no more pages
+    fun loadMore() {
+        val state = mutableState.value
+        val continuation = state.continuation
+        if (continuation == null || state.isLoadingMore || state.status != SearchStatus.Content) return
+
+        mutableState.update { it.copy(isLoadingMore = true) }
+        moreJob = viewModelScope.launch {
+            repository.more(continuation)
+                .onSuccess { page ->
+                    mutableState.update { current ->
+                        val known = current.items.map { it.id }.toSet()
+                        current.copy(
+                            items = current.items + page.items.filter { it.id !in known },
+                            continuation = page.continuation,
+                            isLoadingMore = false
+                        )
+                    }
+                }
+                .onFailure { mutableState.update { it.copy(isLoadingMore = false) } }
+        }
+    }
+
+    // The tab is drawn again after it was left for another one, so it starts from the empty search
+    fun resetIfLeft() {
+        if (!wasLeft) return
+
+        wasLeft = false
+        clear()
+    }
+
+    // Goes one step back, from the results to the empty search, true when there was a step to go back
+    fun back(): Boolean {
+        val state = mutableState.value
+        if (state.submitted == null && state.query.isEmpty()) return false
+
+        clear()
+        return true
+    }
+
+    // Takes one search out of the history
+    fun removeFromHistory(query: String) {
+        val tokens = accountHistory.filter { it.text.equals(query, ignoreCase = true) }.mapNotNull { it.feedbackToken }
+        accountHistory = accountHistory.filterNot { it.text.equals(query, ignoreCase = true) }
+        publishHistory()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            PlayHistory.removeSearch(getApplication(), query)
+            repository.removeFromAccount(tokens)
+        }
+    }
+
+    // Takes every search out of the history
+    fun clearHistory() {
+        val tokens = accountHistory.mapNotNull { it.feedbackToken }
+        accountHistory = emptyList()
+        publishHistory()
+
+        viewModelScope.launch(Dispatchers.IO) {
+            PlayHistory.clearSearches(getApplication())
+            repository.removeFromAccount(tokens)
+        }
+    }
+
+    // Asks the account for its searches, the ones made on other devices come in and the ones made here are confirmed
+    fun refreshAccountHistory(): Job =
+        viewModelScope.launch {
+            repository.accountHistory().onSuccess { history ->
+                followsAccount = history != null
+                accountHistory = history.orEmpty()
+
+                // The device keeps the history of the account, so what it had of its own, such as searches the app made by itself, goes away
+                val texts = accountHistory.map { it.text }
+                if (history != null && texts.take(SearchDimens.HistoryLimit) != localHistory) {
+                    launch(Dispatchers.IO) { PlayHistory.replaceSearches(getApplication(), texts) }
+                }
+            }
+
+            // With no answer, such as with no network, the history of the device is the one shown
+            hasAnswered = true
+            publishHistory()
+        }
+
+    // Signed in, the history is the one of the account so what is removed in one place leaves the other, signed out it is the one of the device
+    private fun publishHistory() {
+        if (!hasAnswered) return
+
+        val history = if (followsAccount) accountHistory.map { it.text } else localHistory
+
+        val seen = history.map { it.lowercase() }.toSet()
+        val suggested = suggestedAll.filter { it.lowercase() !in seen }.take(SearchDimens.SuggestedLimit)
+
+        mutableState.update { it.copy(history = history.take(SearchDimens.HistoryLimit), suggested = suggested) }
+    }
+
+    // Back to the empty search, the history and the suggested searches stay
+    private fun clear() {
+        suggestionsJob?.cancel()
+        searchJob?.cancel()
+        moreJob?.cancel()
+        mutableState.update {
+            SearchUiState(history = it.history, suggested = it.suggested)
+        }
+    }
+
+    // Asks for the words that complete what was typed, a little after the last letter so each letter does not make a request
+    private fun suggest(text: String) {
+        suggestionsJob?.cancel()
+        if (text.isBlank()) {
+            mutableState.update { it.copy(suggestions = emptyList(), isSuggesting = false) }
+            return
+        }
+
+        mutableState.update { it.copy(isSuggesting = true) }
+        suggestionsJob = viewModelScope.launch {
+            delay(SearchDimens.SuggestionDelayMillis)
+            repository.suggestions(text.trim()).onSuccess { suggestions ->
+                mutableState.update { it.copy(suggestions = suggestions) }
+            }
+            mutableState.update { it.copy(isSuggesting = false) }
+        }
+    }
+
+    // The song of a video, the same name by the same artists, among the results or else among the songs of the same search
+    private suspend fun songOf(video: HomeItem, items: List<HomeItem>, query: String): HomeItem? {
+        val isSame = { item: HomeItem ->
+            item.kind == HomeItemKind.Song && !item.isVideo && item.title.trim().equals(video.title.trim(), ignoreCase = true) &&
+                (item.artists.isEmpty() || video.artists.isEmpty() || item.artists.any { artist -> video.artists.any { it.equals(artist, ignoreCase = true) } })
+        }
+        return items.firstOrNull(isSame)
+            ?: repository.search(query, SearchCategory.Songs, keepsHistory = false).getOrNull()?.items?.firstOrNull(isSame)
+    }
+
+    // The first page of a search under a filter, what was on the screen is replaced
+    private fun load(query: String, category: SearchCategory) {
+        searchJob?.cancel()
+        moreJob?.cancel()
+        mutableState.update {
+            it.copy(
+                category = category,
+                status = SearchStatus.Loading,
+                topMatch = null,
+                secondMatch = null,
+                items = emptyList(),
+                continuation = null,
+                isLoadingMore = false
+            )
+        }
+
+        searchJob = viewModelScope.launch {
+            repository.search(query, category)
+                .onSuccess { page ->
+                    val items = page.items.distinctBy { item -> item.id }
+                    val video = page.topMatch?.takeIf { prefersSong && category == SearchCategory.All && it.isVideo }
+                    val song = video?.let { songOf(it, items, query) }
+                    mutableState.update {
+                        it.copy(
+                            status = SearchStatus.Content,
+                            topMatch = song ?: page.topMatch,
+                            secondMatch = video.takeIf { song != null },
+                            items = if (song == null) items else items.filterNot { item -> item.id == song.id },
+                            continuation = page.continuation
+                        )
+                    }
+
+                    // The account has just kept this search
+                    if (category == SearchCategory.All) refreshAccountHistory()
+                }
+                .onFailure { mutableState.update { it.copy(status = SearchStatus.Error) } }
+        }
+    }
+}

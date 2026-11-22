@@ -1,0 +1,192 @@
+name: Release
+
+# Publishes a unified GitHub release for both Android and Windows
+on:
+  push:
+    branches: [main]
+    paths:
+      - spectro-android/build.gradle.kts
+      - spectro-windows/package.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  GH_REPO: ${{ github.repository }}
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+      tag: ${{ steps.version.outputs.tag }}
+      found: ${{ steps.existing.outputs.found }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Read version
+        id: version
+        run: |
+          VERSION=$(grep -oP 'val appVersionName = "\K[^"]+' spectro-android/build.gradle.kts)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not read appVersionName from spectro-android/build.gradle.kts"
+            exit 1
+          fi
+          echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check existing release
+        id: existing
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${{ steps.version.outputs.tag }} already exists, nothing to do."
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  build-android:
+    needs: check-version
+    if: needs.check-version.outputs.found == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up JDK
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 25
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing KEYSTORE_BASE64 secret"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/spectro.jks"
+
+      - name: Build release APKs
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/spectro.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          LASTFM_API_KEY: ${{ secrets.LASTFM_API_KEY }}
+          LASTFM_SECRET: ${{ secrets.LASTFM_SECRET }}
+        run: |
+          chmod +x ./spectro-android/gradlew
+          cd spectro-android && ./gradlew assembleRelease
+
+      - name: Collect APKs
+        run: |
+          VERSION="${{ needs.check-version.outputs.name }}"
+          OUT=spectro-android/build/outputs/apk/release
+          mkdir -p artifacts
+          cp $OUT/*universal*release.apk "artifacts/Spectro-v$VERSION-universal.apk"
+          cp $OUT/*arm64-v8a*release.apk "artifacts/Spectro-v$VERSION-arm64-v8a.apk"
+          cp $OUT/*armeabi-v7a*release.apk "artifacts/Spectro-v$VERSION-armeabi-v7a.apk"
+
+      - name: Upload Android Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apks
+          path: artifacts/*
+
+  build-windows:
+    needs: check-version
+    if: needs.check-version.outputs.found == 'false'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Windows Installer & Executable
+        run: |
+          cd spectro-windows
+          npm ci
+          npm run dist
+
+      - name: Collect Windows Binaries
+        shell: bash
+        run: |
+          VERSION="${{ needs.check-version.outputs.name }}"
+          mkdir -p artifacts
+          cp spectro-windows/release-build/Spectro-Setup.exe "artifacts/Spectro-v$VERSION-Setup.exe"
+          cp spectro-windows/release-build/Spectro.exe "artifacts/Spectro-v$VERSION-Portable.exe"
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: artifacts/*
+
+  publish-release:
+    needs: [check-version, build-android, build-windows]
+    if: needs.check-version.outputs.found == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Build release notes
+        run: |
+          TAG="${{ needs.check-version.outputs.tag }}"
+          {
+            echo "## Spectro $TAG - Official Release"
+            echo
+            echo "Spectro is a modern, high-performance YouTube Music client engineered natively for Android and Windows."
+            echo
+            echo "### 📱 Android Packages"
+            echo "- **Spectro-v*-universal.apk**: Compatible with all Android devices (recommended)."
+            echo "- **Spectro-v*-arm64-v8a.apk**: Optimized for 64-bit ARM devices."
+            echo "- **Spectro-v*-armeabi-v7a.apk**: For 32-bit ARM devices."
+            echo
+            echo "### 💻 Windows Packages"
+            echo "- **Spectro-v*-Setup.exe**: Standard Windows setup wizard with desktop & start menu shortcuts (recommended)."
+            echo "- **Spectro-v*-Portable.exe**: Standalone executable without installation."
+            echo
+            echo "### ✨ Key Capabilities"
+            echo "- **Smart Radio Queue**: Single-genre locked recommendations with dynamic popularity shuffling and artist interleaving."
+            echo "- **Multi-Source Synced Lyrics**: Parallel availability probe across 7 providers with live source switching."
+            echo "- **Parametric Equalizer**: 5-band frequency tuning with dedicated low-end bass boost."
+            echo "- **Spectro Connect**: Frictionless cross-device account synchronization via 6-digit PIN."
+            echo "- **Native Localization**: Automatic operating system language detection (English and Indonesian)."
+            echo "- **Privacy-First**: Pure on-demand streaming, zero telemetry, and zero disk bloat."
+          } > notes.md
+          cat notes.md
+
+      - name: Publish Release to GitHub
+        run: |
+          TAG="${{ needs.check-version.outputs.tag }}"
+          gh release create "$TAG" dist/* \
+            --target "${{ github.sha }}" \
+            --title "Spectro $TAG" \
+            --notes-file notes.md \
+            --latest

@@ -1,0 +1,561 @@
+﻿package com.spectro.app.features.menu
+
+// Android and Compose layouts
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import com.spectro.app.core.designsystem.components.SpectroSwitch
+import android.content.res.Configuration
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.MutableTransitionState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+// Material 3 components
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+// Compose state and runtime
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+// UI utilities
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import coil3.compose.AsyncImage
+// Project resources
+import com.spectro.app.core.designsystem.components.ScrollIndicatorWidth
+import com.spectro.app.core.designsystem.components.scrollIndicator
+import com.spectro.app.core.designsystem.icons.SpectroIcons
+import com.spectro.app.core.designsystem.theme.SpectroMotion
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+import com.spectro.app.features.home.ui.components.HomeDimens
+import com.spectro.app.features.player.ui.components.PlayerDimens
+
+// The pieces of the menus drawn as cards, the ones of a song, of an album, of a playlist, of an artist, of a podcast and of the queue are made of them
+
+// The head of a menu, the cover when there is one, the name in bold and the line under it in the color of the accent, with something at the end if asked
+@Composable
+internal fun CardMenuHead(
+    title: String,
+    modifier: Modifier = Modifier,
+    subtitle: String? = null,
+    coverUrl: String? = null,
+    hasCover: Boolean = true,
+    isProfile: Boolean = false,
+    coverShape: Shape = RoundedCornerShape(ItemMenuDimens.HeaderCoverCorner),
+    // Lying down the cover can stand over the name, so it is as big as the room it has
+    isStacked: Boolean = false,
+    trailing: (@Composable () -> Unit)? = null
+) {
+    // The cover and the name are one block, lifted so the room between the top of the sheet and the cover is the same as the one between the artist and the bottom of the screen
+    if (isStacked && hasCover) {
+        Column(modifier = modifier.fillMaxWidth().offset(y = -ItemMenuDimens.StackedLift).padding(vertical = ItemMenuDimens.HeaderVertical)) {
+            MenuHeadCover(coverUrl, coverShape, isProfile, ItemMenuDimens.StackedCover)
+            Spacer(Modifier.height(ItemMenuDimens.HeaderGap))
+            MenuHeadTexts(title, subtitle)
+        }
+        trailing?.invoke()
+        return
+    }
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = ItemMenuDimens.HeaderVertical)
+    ) {
+        if (hasCover) MenuHeadCover(coverUrl, coverShape, isProfile, ItemMenuDimens.HeaderCover)
+        Column(modifier = Modifier.weight(1f).padding(start = if (hasCover) ItemMenuDimens.HeaderGap else ItemMenuDimens.CreditsTitleStart)) {
+            MenuHeadTexts(title, subtitle)
+        }
+        trailing?.invoke()
+    }
+}
+
+// The cover of a head, a person with no photo yet is the silhouette of the profile, under the photo that covers it when it comes
+@Composable
+private fun MenuHeadCover(coverUrl: String?, coverShape: Shape, isProfile: Boolean, size: Dp) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .size(size)
+            .clip(coverShape)
+            .background(SpectroTheme.colors.skeleton)
+    ) {
+        if (isProfile) {
+            Icon(imageVector = SpectroIcons.Person, contentDescription = null, tint = MaterialTheme.colorScheme.onBackground, modifier = Modifier.fillMaxSize(HomeDimens.ProfileSilhouette))
+        }
+        AsyncImage(model = coverUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    }
+}
+
+// The name in bold and the line under it in the color of the accent
+@Composable
+private fun MenuHeadTexts(title: String, subtitle: String?) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+        color = MaterialTheme.colorScheme.onSurface,
+        maxLines = 1,
+        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
+    )
+    if (!subtitle.isNullOrEmpty()) {
+        Text(
+            text = subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = SpectroTheme.colors.playerAccent,
+            maxLines = 1,
+            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
+        )
+    }
+}
+
+// The cards of the top, side by side with the room above and under them
+@Composable
+internal fun CardMenuTiles(content: @Composable RowScope.() -> Unit) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardTileGap),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = ItemMenuDimens.CardGroupGap - ItemMenuDimens.CardGap, bottom = ItemMenuDimens.CardGroupGap - ItemMenuDimens.CardGap),
+        content = content
+    )
+}
+
+// The head and the options of a menu, one under the other, and lying down, where the screen is too short for all of them, the head on the start and the options scrolling on the end
+@Composable
+internal fun CardMenuLayout(head: @Composable () -> Unit, options: @Composable () -> Unit) {
+    if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGroupGap),
+            modifier = Modifier.padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = ItemMenuDimens.LandscapeBottom)
+        ) {
+            // The head sits in the middle of the height the options take
+            Column(
+                verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+                modifier = Modifier
+                    .weight(ItemMenuDimens.LandscapeHeadWeight)
+                    .align(Alignment.CenterVertically)
+            ) { head() }
+            // The bar on the end tells there are more options below
+            val optionsScroll = rememberScrollState()
+            Column(
+                verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+                modifier = Modifier
+                    .weight(1f - ItemMenuDimens.LandscapeHeadWeight)
+                    .scrollIndicator(optionsScroll)
+                    .verticalScroll(optionsScroll)
+                    .padding(end = ScrollIndicatorWidth + ItemMenuDimens.LandscapeIndicatorGap)
+            ) { options() }
+        }
+    } else {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+            modifier = Modifier.padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = PlayerDimens.OptionsBottom)
+        ) {
+            head()
+            options()
+        }
+    }
+}
+
+// The title, the fields as cards and the action of a sheet that asks for something, one under the other, and lying down the title with the action on the start and the fields scrolling on the end
+@Composable
+internal fun CardMenuForm(title: String, action: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
+    if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGroupGap),
+            modifier = Modifier
+                .imePadding()
+                .padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = ItemMenuDimens.LandscapeBottom)
+        ) {
+            // The title and the action sit in the middle of the height the fields take
+            Column(
+                verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+                modifier = Modifier
+                    .weight(ItemMenuDimens.LandscapeHeadWeight)
+                    .align(Alignment.CenterVertically)
+            ) {
+                CardMenuHead(title = title, hasCover = false)
+                action()
+            }
+            // The bar on the end tells there are more fields below
+            val scroll = rememberScrollState()
+            Column(
+                verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+                modifier = Modifier
+                    .weight(1f - ItemMenuDimens.LandscapeHeadWeight)
+                    .scrollIndicator(scroll)
+                    .verticalScroll(scroll)
+                    .padding(end = ScrollIndicatorWidth + ItemMenuDimens.LandscapeIndicatorGap)
+            ) { content() }
+        }
+    } else {
+        Column(modifier = Modifier.imePadding().verticalScroll(rememberScrollState())) {
+            CardMenuList {
+                CardMenuHead(title = title, hasCover = false)
+                content()
+                action()
+            }
+        }
+    }
+}
+
+// A card that comes after the menu is open, such as the ones that need the page of what the menu is for, it fades in and opens its room instead of showing all of a sudden
+@Composable
+internal fun MenuReveal(content: @Composable () -> Unit) {
+    val visible = remember { MutableTransitionState(false).apply { targetState = true } }
+
+    AnimatedVisibility(
+        visibleState = visible,
+        enter = fadeIn(tween(SpectroMotion.ExpandMillis)) + expandVertically(tween(SpectroMotion.ExpandMillis)),
+        exit = fadeOut(tween(SpectroMotion.ExpandMillis)) + shrinkVertically(tween(SpectroMotion.ExpandMillis))
+    ) { content() }
+}
+
+// A menu that is only a few cards, with no head
+@Composable
+internal fun CardMenuList(content: @Composable () -> Unit) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+        modifier = Modifier.padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = PlayerDimens.OptionsBottom)
+    ) { content() }
+}
+
+// One of the cards of the top, the icon in the color of the accent over its name
+@Composable
+internal fun MenuCardTile(
+    icon: ImageVector,
+    label: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+            .alpha(if (enabled) 1f else ItemMenuDimens.DisabledAlpha)
+            .height(ItemMenuDimens.CardTileHeight)
+            .clip(RoundedCornerShape(ItemMenuDimens.CardCorner))
+            .background(SpectroTheme.colors.menuCard)
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(ItemMenuDimens.CardTilePadding)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = SpectroTheme.colors.playerAccent,
+            modifier = Modifier.size(ItemMenuDimens.CardTileIcon)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            modifier = Modifier
+                .padding(top = ItemMenuDimens.CardTileLabelTop)
+                .basicMarquee(iterations = Int.MAX_VALUE)
+        )
+    }
+}
+
+// One option as a card, the icon in the color of the accent, its name and a line under it when there is one, with something at the end if asked
+@Composable
+internal fun MenuCard(
+    icon: ImageVector,
+    title: String,
+    subtitle: String? = null,
+    modifier: Modifier = Modifier,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(ItemMenuDimens.CardCorner))
+            .background(SpectroTheme.colors.menuCard)
+            .clickable(onClick = onClick)
+            .padding(horizontal = ItemMenuDimens.CardRowHorizontal, vertical = ItemMenuDimens.CardRowVertical)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = SpectroTheme.colors.playerAccent,
+            modifier = Modifier.size(ItemMenuDimens.CardRowIcon)
+        )
+        Column(modifier = Modifier.weight(1f).padding(start = ItemMenuDimens.CardRowTextStart)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
+            )
+            if (!subtitle.isNullOrEmpty()) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        trailing?.invoke()
+    }
+}
+
+// The card of a row that has more than a name, its parts are given by the one that draws it, a tap does the job when there is one
+@Composable
+internal fun MenuCardBase(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    content: @Composable RowScope.() -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(ItemMenuDimens.CardCorner))
+            .background(SpectroTheme.colors.menuCard)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = ItemMenuDimens.CardRowHorizontal, vertical = ItemMenuDimens.CardRowVertical),
+        content = content
+    )
+}
+
+// Several rows in one card, with a line between them
+@Composable
+internal fun MenuCardGroup(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(ItemMenuDimens.CardCorner))
+            .background(SpectroTheme.colors.menuCard),
+        content = content
+    )
+}
+
+// The line between two rows of a card
+@Composable
+internal fun MenuCardDivider() {
+    HorizontalDivider(
+        modifier = Modifier.padding(horizontal = ItemMenuDimens.CardRowHorizontal),
+        thickness = SpectroTheme.dimens.hairline,
+        color = MaterialTheme.colorScheme.outlineVariant
+    )
+}
+
+// A row of a card with its name, a line about it and the switch at the end, a tap anywhere on the row turns it
+@Composable
+internal fun CardSwitchRow(
+    title: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    hint: String? = null,
+    enabled: Boolean = true
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = enabled) { onChange(!checked) }
+            .padding(horizontal = ItemMenuDimens.CardRowHorizontal, vertical = ItemMenuDimens.CardRowVertical)
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = ItemMenuDimens.CardRowTextStart)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            if (!hint.isNullOrEmpty()) {
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        SpectroSwitch(checked = checked, onCheckedChange = onChange, enabled = enabled)
+    }
+}
+
+// The name of a group of cards of a sheet
+@Composable
+internal fun CardMenuSection(title: String, color: Color = MaterialTheme.colorScheme.onSurfaceVariant) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.labelLarge,
+        color = color,
+        modifier = Modifier.padding(start = ItemMenuDimens.CardRowHorizontal, top = ItemMenuDimens.CardGap)
+    )
+}
+
+// The button of a sheet that asks for something, filled and as wide as the cards so it is not taken for one of the choices, faded while it cannot
+@Composable
+internal fun CardMenuButton(text: String, isEnabled: Boolean, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        enabled = isEnabled,
+        colors = ButtonDefaults.buttonColors(
+            containerColor = MaterialTheme.colorScheme.onBackground,
+            contentColor = MaterialTheme.colorScheme.background,
+            disabledContainerColor = MaterialTheme.colorScheme.onBackground,
+            disabledContentColor = MaterialTheme.colorScheme.background
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = ItemMenuDimens.ButtonTop)
+            .height(ItemMenuDimens.ButtonHeight)
+            .alpha(if (isEnabled) 1f else ItemMenuDimens.DisabledAlpha)
+    ) {
+        Text(text = text, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+    }
+}
+
+// A field of text on a card, with no line under it
+@Composable
+internal fun CardMenuField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String? = null,
+    placeholder: String? = null,
+    leadingIcon: ImageVector? = null,
+    singleLine: Boolean = false,
+    maxLines: Int = Int.MAX_VALUE,
+    imeAction: ImeAction = ImeAction.Default,
+    capitalization: KeyboardCapitalization = KeyboardCapitalization.Sentences,
+    keyboardActions: KeyboardActions = KeyboardActions.Default
+) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = label?.let { { Text(text = it) } },
+        placeholder = placeholder?.let { { Text(text = it, maxLines = 1) } },
+        leadingIcon = leadingIcon?.let { { Icon(imageVector = it, contentDescription = null) } },
+        singleLine = singleLine,
+        maxLines = maxLines,
+        keyboardOptions = KeyboardOptions(capitalization = capitalization, imeAction = imeAction),
+        keyboardActions = keyboardActions,
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(ItemMenuDimens.CardCorner))
+            .background(SpectroTheme.colors.menuCard)
+    )
+}
+
+// The title and what comes with it, and a list of cards under it that scrolls, and lying down the title on the start and the list scrolling on the end
+// A list that keeps its height does not grow and shrink as its answers come
+@Composable
+internal fun CardMenuLazyForm(
+    title: String,
+    top: @Composable () -> Unit = {},
+    isHeightKept: Boolean = false,
+    listModifier: Modifier = Modifier,
+    content: LazyListScope.() -> Unit
+) {
+    val listState = rememberLazyListState()
+
+    if (LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGroupGap),
+            modifier = Modifier
+                .imePadding()
+                .padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = ItemMenuDimens.LandscapeBottom)
+        ) {
+            Column(
+                verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+                modifier = Modifier
+                    .weight(ItemMenuDimens.LandscapeHeadWeight)
+                    .align(Alignment.CenterVertically)
+            ) {
+                CardMenuHead(title = title, hasCover = false)
+                top()
+            }
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+                contentPadding = PaddingValues(end = ScrollIndicatorWidth + ItemMenuDimens.LandscapeIndicatorGap),
+                modifier = listModifier
+                    .weight(1f - ItemMenuDimens.LandscapeHeadWeight)
+                    .scrollIndicator(listState),
+                content = content
+            )
+        }
+    } else {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+            modifier = Modifier
+                .imePadding()
+                .padding(start = ItemMenuDimens.CardsSide, end = ItemMenuDimens.CardsSide, bottom = PlayerDimens.OptionsBottom)
+        ) {
+            CardMenuHead(title = title, hasCover = false)
+            top()
+            LazyColumn(
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(ItemMenuDimens.CardGap),
+                modifier = listModifier
+                    .heightIn(min = if (isHeightKept) ItemMenuDimens.ListMaxHeight else ItemMenuDimens.CardGap * 0, max = ItemMenuDimens.ListMaxHeight)
+                    .scrollIndicator(listState),
+                content = content
+            )
+        }
+    }
+}

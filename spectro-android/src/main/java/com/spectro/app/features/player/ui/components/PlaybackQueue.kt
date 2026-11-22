@@ -1,0 +1,1304 @@
+package com.spectro.app.features.player.ui.components
+
+// Android app, intents and toasts
+import android.content.Context
+import android.content.Intent
+// Back handling
+import androidx.activity.compose.BackHandler
+// Compose animation
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.RepeatMode as AnimationRepeat
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+// Compose layouts and foundations
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+// Material 3 components
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+// Compose state and runtime
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+// UI styling and utilities
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import com.spectro.app.core.designsystem.theme.SpectroMotion
+import androidx.compose.ui.unit.Velocity
+// Image loading
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.transformations
+// Reorderable list
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+// Java text
+import java.text.Normalizer
+// Coroutines
+import kotlinx.coroutines.launch
+// Project resources
+import com.spectro.app.R
+import com.spectro.app.features.home.ui.components.DownloadedMark
+import com.spectro.app.core.designsystem.components.VideoBadge
+import com.spectro.app.core.designsystem.components.VideoSquareCrop
+import com.spectro.app.core.designsystem.icons.SpectroIcons
+import com.spectro.app.core.designsystem.theme.SpectroTheme
+import com.spectro.app.core.innertube.MusicOrigin
+import com.spectro.app.core.innertube.isVideoThumbnail
+import com.spectro.app.core.innertube.resize
+import com.spectro.app.core.playback.PlayableTrack
+import com.spectro.app.core.device.artistLine
+import com.spectro.app.core.device.isDeviceTrack
+import com.spectro.app.core.playback.PlayerConnection
+import com.spectro.app.features.playlist.ui.SaveToPlaylist
+import com.spectro.app.core.playback.QueueEntry
+import com.spectro.app.core.designsystem.components.OverlaySheet
+import com.spectro.app.core.designsystem.components.Toasts
+
+// Units of the length of the queue
+private const val MillisPerSecond = 1000L
+private const val SecondsPerMinute = 60L
+private const val SecondsPerHour = 3_600L
+private const val SecondsPerDay = 86_400L
+private const val SecondsPerMonth = 2_592_000L
+private const val SecondsPerYear = 31_536_000L
+
+// What the icon at the end of the song that plays shows
+private enum class QueueIndicator { Loading, Playing, Paused }
+
+// Queue of the old Spectro over the open player, the songs in the order they play
+@Composable
+fun PlaybackQueue(
+    frame: LandscapeFrame?,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val queue by PlayerConnection.queue.collectAsState()
+    val currentIndex by PlayerConnection.currentIndex.collectAsState()
+    val isPlaying by PlayerConnection.isPlaying.collectAsState()
+    val isLoading by PlayerConnection.isLoading.collectAsState()
+    val isLoadingMore by PlayerConnection.isLoadingMore.collectAsState()
+    val repeatMode by PlayerConnection.repeat.collectAsState()
+    val isShuffleActive by PlayerConnection.shuffle.collectAsState()
+    val accent = SpectroTheme.colors.playerAccent
+    val listState = rememberLazyListState()
+    var isLocked by rememberSaveable { mutableStateOf(false) }
+    val currentOnClose by rememberUpdatedState(onClose)
+
+    // How high the keyboard is, which already covers the room of the bar at the bottom, so the list keeps apart only what the keyboard leaves of it, as it comes and goes
+    val keyboardHeight = with(LocalDensity.current) { WindowInsets.ime.getBottom(this).toDp() }
+
+    // Search of the queue, open or closed and the words typed
+    var isSearching by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+
+    // Selection of several songs, on or off and the ids of the ones marked
+    var isSelecting by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf(emptySet<String>()) }
+
+    // Copy of the queue the drag moves, the player gets the new order when the drag ends
+    val entries = remember { mutableStateListOf<QueueEntry>() }
+    var isDragging by remember { mutableStateOf(false) }
+    var shownCurrent by remember { mutableIntStateOf(-1) }
+    var shownShuffle by remember { mutableStateOf(isShuffleActive) }
+    LaunchedEffect(Unit) {
+        listState.scrollToItem(0)
+    }
+
+    LaunchedEffect(queue, currentIndex) {
+        // A burst of changes, such as the shuffle pressed many times, shows only where it ends, the first copy has no wait
+        if (entries.isNotEmpty()) delay(PlayerDimens.QueueSettleMillis)
+        if (isDragging) return@LaunchedEffect
+        entries.clear()
+        entries.addAll(queue)
+
+        // Queue always starts at the top (#1)
+        if (query.isBlank() && (currentIndex != shownCurrent || isShuffleActive != shownShuffle)) {
+            listState.scrollToItem(0)
+            shownCurrent = currentIndex
+            shownShuffle = isShuffleActive
+        }
+    }
+
+    // The songs shown are only the upcoming ones (current and next), past played songs disappear from the list
+    val shown by remember {
+        derivedStateOf {
+            val words = query.fold()
+            val upNext = entries.filter { it.index >= currentIndex }.distinctBy { it.track.id }
+            if (words.isBlank()) upNext else upNext.filter { "${it.track.title} ${it.track.artist.orEmpty()}".fold().contains(words) }
+        }
+    }
+    val isFiltering = query.isNotBlank()
+
+    // Back closes the search before anything else of the queue
+    BackHandler(enabled = isSearching) {
+        isSearching = false
+        query = ""
+    }
+
+    // Songs marked, a song that left the queue is no longer one of them, and back leaves the selection first of all
+    // Playing next and removing make no sense for the song that plays, so those two wait until it is not among the marked ones
+    val selected = entries.filter { it.track.id in selectedIds }
+    val selectionHasCurrent = selected.any { it.index == currentIndex }
+    BackHandler(enabled = isSelecting) {
+        isSelecting = false
+        selectedIds = emptySet()
+    }
+
+    // A shuffled order is not the order of the player, and a filtered one is not the whole queue, so they are not dragged or played next
+    val canReorder = !isLocked && !isShuffleActive && !isFiltering && !isSelecting
+    val reorderState = rememberReorderableLazyListState(listState) { from, to ->
+        entries.add(to.index, entries.removeAt(from.index))
+    }
+
+    val hasEntries = entries.isNotEmpty()
+
+    // Pulled past the top the queue closes
+    var pullDown by remember { mutableFloatStateOf(0f) }
+    val animatedPullDown by animateFloatAsState(pullDown, spring(stiffness = Spring.StiffnessMediumLow), label = "PullDown")
+
+    // Near the end of the list the radio brings more songs by itself, so there is no pull to make, a search shows only part of the queue so it brings none
+    val isNearEnd by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= info.totalItemsCount - PlayerDimens.QueueLoadAhead
+        }
+    }
+    LaunchedEffect(isNearEnd, entries.size, isLoadingMore, isFiltering) {
+        if (isNearEnd && hasEntries && !isFiltering && !isLoadingMore) PlayerConnection.loadMore()
+    }
+
+    val pullConnection = remember {
+        object : NestedScrollConnection {
+            var isTopReached = false
+
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                if (available.y < 0) isTopReached = false
+
+                if (available.y > 0 && !listState.canScrollBackward) {
+                    pullDown += available.y * PlayerDimens.QueuePullResistance
+                    return available
+                }
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                if (!isTopReached) isTopReached = consumed.y == 0f && available.y > 0
+                return if (isTopReached && source == NestedScrollSource.UserInput) available else Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                if (pullDown >= PlayerDimens.QueueClosePullPx) currentOnClose()
+                pullDown = 0f
+                return if (isTopReached) available else Velocity.Zero
+            }
+
+            override suspend fun onPostFling(consumed: Velocity, available: Velocity): Velocity {
+                isTopReached = false
+                pullDown = 0f
+                return Velocity.Zero
+            }
+        }
+    }
+
+    Surface(
+        modifier = modifier.fillMaxSize(),
+        color = if (frame != null) Color.Transparent else MaterialTheme.colorScheme.background
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .then(if (frame == null) Modifier.statusBarsPadding() else Modifier)
+                // Drags outside the list stay in the queue, so pulling the header down closes only the queue and not the player behind it
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(
+                        onDragEnd = {
+                            if (pullDown >= PlayerDimens.QueueClosePullPx) currentOnClose()
+                            pullDown = 0f
+                        },
+                        onDragCancel = { pullDown = 0f }
+                    ) { change, drag ->
+                        change.consume()
+                        pullDown = (pullDown + drag * PlayerDimens.QueuePullResistance).coerceAtLeast(0f)
+                    }
+                }
+                .graphicsLayer {
+                    translationY = animatedPullDown * PlayerDimens.QueuePullTranslation
+                    alpha = 1f - (animatedPullDown / PlayerDimens.QueueClosePullPx).coerceIn(0f, 1f) * PlayerDimens.QueuePullFade
+                }
+        ) {
+            // The field grows from its end and goes back the same way
+            val searchProgress by animateFloatAsState(
+                targetValue = if (isSearching) 1f else 0f,
+                animationSpec = tween(PlayerDimens.QueueSearchMillis),
+                label = "QueueSearch"
+            )
+
+            // Lying down the keyboard leaves little room, so the field takes the place of the name on the line of the tools
+            val isFieldOnLine = frame != null && (isSearching || searchProgress > 0f)
+            if (isSelecting && !isFieldOnLine) {
+                SelectionHeader(
+                    frame = frame,
+                    count = selected.size,
+                    allSelected = entries.isNotEmpty() && selected.size == entries.size,
+                    accent = accent,
+                    onExit = {
+                        isSelecting = false
+                        selectedIds = emptySet()
+                    },
+                    onToggleAll = {
+                        selectedIds = if (selected.size == entries.size) emptySet() else entries.mapTo(HashSet()) { it.track.id }
+                    }
+                )
+            } else if (!isFieldOnLine) {
+                QueueHeader(
+                    frame = frame,
+                    songCount = entries.size,
+                    totalMs = entries.sumOf { entry ->
+                        if (entry.track.durationMs > 0L) {
+                            entry.track.durationMs
+                        } else if (entry.index == currentIndex && PlayerConnection.durationMs > 0L) {
+                            PlayerConnection.durationMs
+                        } else {
+                            210_000L
+                        }
+                    },
+                    isLocked = isLocked,
+                    accent = accent,
+                    onClose = onClose,
+                    onLockToggle = { isLocked = !isLocked }
+                )
+            }
+
+            if (isSearching || searchProgress > 0f) {
+                QueueSearchField(
+                    frame = frame,
+                    query = query,
+                    onQueryChange = { query = it },
+                    accent = accent,
+                    progress = searchProgress,
+                    onClose = {
+                        isSearching = false
+                        query = ""
+                    }
+                )
+            }
+
+            // The keyboard lifts the list, so what is typed never hides the songs found
+            Box(modifier = Modifier.fillMaxSize().imePadding()) {
+                if (entries.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        EmptyQueue()
+                    }
+                } else if (shown.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.queue_search_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(PlayerDimens.QueueEmptyPadding)
+                    )
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .then(
+                                if (frame != null) {
+                                    Modifier
+                                        .padding(bottom = maxOf(frame.queueListBottom - keyboardHeight, PlayerDimens.None))
+                                        .fadingEnds(PlayerDimens.QueueFadeFraction)
+                                } else {
+                                    Modifier
+                                }
+                            )
+                            .nestedScroll(pullConnection),
+                        // Lying down the room above the first song keeps it out of the fade while the list rests
+                        contentPadding = PaddingValues(
+                            top = if (frame != null) PlayerDimens.QueueListTopLandscape else PlayerDimens.None,
+                            bottom = if (frame != null) PlayerDimens.QueueListBottomLandscape else PlayerDimens.QueueListBottom
+                        )
+                    ) {
+                        itemsIndexed(shown, key = { _, entry -> entry.track.id }) { shownPosition, entry ->
+                            // Place of the song in the whole queue, which is not its place in the list while a search shows part of it
+                            val position = if (isFiltering) entries.indexOf(entry) else shownPosition
+                            val isCurrent = entry.index == currentIndex
+                            // Lying down the phone is held by the sides and a touch could remove a song by accident, so there is no swipe, the menu has the same options
+                            val canSwipe = frame == null && !isCurrent && !isLocked && !isSelecting
+
+                            ReorderableItem(reorderState, key = entry.track.id) { isItemDragging ->
+                                val handle = if (canReorder) {
+                                    // The handle keeps its first callbacks, so the song is found again by its id when the drag ends
+                                    val songId = entry.track.id
+                                    Modifier.draggableHandle(
+                                        onDragStarted = { isDragging = true },
+                                        onDragStopped = {
+                                            val target = entries.indexOfFirst { it.track.id == songId }
+                                            entries.getOrNull(target)?.let { moved -> PlayerConnection.move(moved.index, target) }
+                                            isDragging = false
+                                        }
+                                    )
+                                } else {
+                                    Modifier
+                                }
+
+                                SwipeableQueueItem(
+                                    entry = entry,
+                                    canSwipe = canSwipe,
+                                    canPlayNext = canSwipe && !isShuffleActive,
+                                    isDragging = isItemDragging,
+                                    isCompact = frame != null,
+                                    accent = accent
+                                ) {
+                                    QueueItem(
+                                        entry = entry,
+                                        isCurrent = isCurrent,
+                                        isHistory = position < entries.indexOfFirst { it.index == currentIndex },
+                                        indicator = when {
+                                            isLoading -> QueueIndicator.Loading
+                                            isPlaying -> QueueIndicator.Playing
+                                            else -> QueueIndicator.Paused
+                                        },
+                                        showHandle = canReorder,
+                                        isCompact = frame != null,
+                                        modifier = handle,
+                                        accent = accent,
+                                        isSelected = if (isSelecting) entry.track.id in selectedIds else null,
+                                        onClick = {
+                                            if (isSelecting) {
+                                                val id = entry.track.id
+                                                selectedIds = if (id in selectedIds) selectedIds - id else selectedIds + id
+                                            } else if (isCurrent) {
+                                                PlayerConnection.togglePlayPause()
+                                            } else {
+                                                PlayerConnection.playAt(entry.index)
+                                                if (position == entries.lastIndex) PlayerConnection.loadMore()
+                                            }
+                                        },
+                                        onMoreClick = { showQueueItemMenu(entry.track.id, isLocked) }
+                                    )
+                                }
+                            }
+                        }
+
+                        if (isLoadingMore) {
+                            item { LoadMoreSpinner(accent = accent) }
+                        }
+                    }
+                }
+
+                // The bar steps aside while searching, the field and the keyboard take its place, and it turns into the actions of the selection
+                val context = LocalContext.current
+
+                // Lying down the bar stays in its place under the keyboard, as shuffle, repeat and favorite do, instead of being lifted by it
+                val keyboardInsets = WindowInsets.ime
+                val barLift = if (frame != null) Modifier.offset { IntOffset(0, keyboardInsets.getBottom(this)) } else Modifier
+                if (isSelecting) {
+                    SelectionBar(
+                        frame = frame,
+                        hasSelection = selected.isNotEmpty(),
+                        canPlayNext = !isShuffleActive && !selectionHasCurrent,
+                        canSave = selected.any { !isDeviceTrack(it.track.id) },
+                        canRemove = !isLocked && !selectionHasCurrent,
+                        accent = accent,
+                        onPlayNext = {
+                            PlayerConnection.playNextAll(selectedIds)
+                            selectedIds = emptySet()
+                        },
+                        // The files of the phone are not on YouTube Music, so they cannot go to a playlist
+                        onSave = { SaveToPlaylist.show(selected.map { it.track.id }.filterNot(::isDeviceTrack)) },
+                        onShare = { shareQueue(context, selected.map { it.track }) },
+                        onRemove = {
+                            PlayerConnection.removeAll(selectedIds)
+                            selectedIds = emptySet()
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .then(barLift)
+                    )
+                } else if (!isSearching || frame != null) {
+                    QueueBar(
+                        frame = frame,
+                        repeatMode = repeatMode,
+                        isShuffleActive = isShuffleActive,
+                        isLocked = isLocked,
+                        accent = accent,
+                        onLockToggle = { isLocked = !isLocked },
+                        onSelectClick = { isSelecting = true },
+                        onSearchClick = { isSearching = true },
+                        onShareClick = { shareQueue(context, shown.map { it.track }) },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .then(barLift)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// Options of a song of the queue, drawn by the main screen so they rise over the buttons of the player, which lying down are over the queue
+// The song is looked for again by its id, so the menu follows it if the queue changes and closes by itself when the song leaves it
+private fun showQueueItemMenu(songId: String, isLocked: Boolean) {
+    OverlaySheet.show {
+        val queue by PlayerConnection.queue.collectAsState()
+        val currentIndex by PlayerConnection.currentIndex.collectAsState()
+        val isShuffleActive by PlayerConnection.shuffle.collectAsState()
+        val entry = queue.firstOrNull { it.track.id == songId }
+
+        if (entry == null) {
+            LaunchedEffect(Unit) { OverlaySheet.dismiss() }
+        } else {
+            val isCurrent = entry.index == currentIndex
+            QueueItemMenu(
+                entry = entry,
+                canPlayNext = !isCurrent && !isShuffleActive,
+                canRemove = !isCurrent && !isLocked,
+                onPlayNext = { PlayerConnection.playNext(entry.index) },
+                onRemove = { PlayerConnection.remove(entry.index) },
+                onDismiss = OverlaySheet::dismiss
+            )
+        }
+    }
+}
+
+// Title, the number of songs and how long they last, with close and lock at the sides
+@Composable
+private fun QueueHeader(
+    frame: LandscapeFrame?,
+    songCount: Int,
+    totalMs: Long,
+    isLocked: Boolean,
+    accent: Color,
+    onClose: () -> Unit,
+    onLockToggle: () -> Unit
+) {
+    // Length split from years down to seconds, each unit shown only when it is not zero
+    var rest = totalMs / MillisPerSecond
+    val parts = buildList {
+        val years = rest / SecondsPerYear
+        rest %= SecondsPerYear
+        val months = rest / SecondsPerMonth
+        rest %= SecondsPerMonth
+        val days = rest / SecondsPerDay
+        rest %= SecondsPerDay
+        val hours = rest / SecondsPerHour
+        rest %= SecondsPerHour
+        val minutes = rest / SecondsPerMinute
+        val seconds = rest % SecondsPerMinute
+
+        if (years > 0) add(stringResource(R.string.queue_years, years.toInt()))
+        if (months > 0) add(pluralStringResource(R.plurals.queue_months, months.toInt(), months.toInt()))
+        if (days > 0) add(stringResource(R.string.queue_days, days.toInt()))
+        if (hours > 0) add(stringResource(R.string.queue_hours, hours.toInt()))
+        if (minutes > 0) add(stringResource(R.string.queue_minutes, minutes.toInt()))
+        if (seconds > 0 || isEmpty()) add(stringResource(R.string.queue_seconds, seconds.toInt()))
+    }
+    val length = parts.joinToString(stringResource(R.string.queue_length_separator))
+    val songs = pluralStringResource(R.plurals.queue_songs, songCount, songCount)
+
+    // Lying down it is only the name on the line of the tools, the button of the queue there closes it and the lock goes to the bar
+    if (frame != null) {
+        Box(
+            contentAlignment = Alignment.CenterStart,
+            modifier = Modifier
+                .fillMaxWidth()
+                .sideHeader(frame)
+        ) {
+            Row {
+                Text(
+                    text = stringResource(R.string.queue_title),
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, fontSize = PlayerDimens.LandscapeSideTitleSize),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    modifier = Modifier.alignByBaseline()
+                )
+                Spacer(Modifier.width(PlayerDimens.LandscapeSideTitleGap))
+                Text(
+                    text = "$songs \u2022 $length",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.alignByBaseline()
+                )
+            }
+        }
+        return
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .windowInsetsPadding(WindowInsets.displayCutout)
+            .padding(PlayerDimens.QueueHeaderPadding),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onClose) {
+            Icon(SpectroIcons.Close, stringResource(R.string.queue_close), tint = accent)
+        }
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                text = stringResource(R.string.queue_title),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, fontSize = PlayerDimens.QueueTitleSize),
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                text = "$songs \u2022 $length",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        IconButton(onClick = onLockToggle) {
+            Icon(
+                imageVector = if (isLocked) SpectroIcons.Lock else SpectroIcons.LockOpen,
+                contentDescription = stringResource(if (isLocked) R.string.queue_unlock else R.string.queue_lock),
+                tint = if (isLocked) accent else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+// A song that slides right to leave the queue and left to play next, only a little of the way so it never leaves the screen
+@Composable
+private fun SwipeableQueueItem(
+    entry: QueueEntry,
+    canSwipe: Boolean,
+    canPlayNext: Boolean,
+    isDragging: Boolean,
+    isCompact: Boolean,
+    accent: Color,
+    content: @Composable () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val dismissState = rememberSwipeToDismissBoxState(positionalThreshold = { it * PlayerDimens.QueueSwipeThreshold })
+    val current by rememberUpdatedState(entry)
+
+    SwipeToDismissBox(
+        state = dismissState,
+        backgroundContent = { if (canSwipe) SwipeBackground(dismissState, accent, if (isCompact) PlayerDimens.None else PlayerDimens.QueueItemSide) },
+        modifier = Modifier.padding(vertical = if (isCompact) PlayerDimens.QueueItemGapLandscape else PlayerDimens.QueueItemGap),
+        enableDismissFromStartToEnd = canSwipe,
+        enableDismissFromEndToStart = canPlayNext,
+        onDismiss = { direction ->
+            when (direction) {
+                SwipeToDismissBoxValue.StartToEnd -> PlayerConnection.remove(current.index)
+                SwipeToDismissBoxValue.EndToStart -> {
+                    PlayerConnection.playNext(current.index)
+                    scope.launch { dismissState.reset() }
+                }
+                SwipeToDismissBoxValue.Settled -> Unit
+            }
+        }
+    ) {
+        Box(
+            modifier = Modifier.graphicsLayer {
+                if (canSwipe) {
+                    // The card stops at a share of the width while it is pulled
+                    val offset = runCatching { dismissState.requireOffset() }.getOrDefault(0f)
+                    val limit = size.width * PlayerDimens.QueueSwipeLimit
+                    translationX = offset.coerceIn(-limit, limit) - offset
+                }
+                val scale = if (isDragging) PlayerDimens.QueueDraggingScale else 1f
+                scaleX = scale
+                scaleY = scale
+            }
+        ) {
+            content()
+        }
+    }
+}
+
+// Color behind a song being swiped, red with a bin to remove it and the accent to play it next
+@Composable
+private fun SwipeBackground(state: SwipeToDismissBoxState, accent: Color, side: Dp) {
+    val direction = state.dismissDirection
+    val remove = MaterialTheme.colorScheme.error
+    val colors = when (direction) {
+        SwipeToDismissBoxValue.StartToEnd -> listOf(remove, remove.copy(alpha = PlayerDimens.QueueSwipeFadeAlpha))
+        SwipeToDismissBoxValue.EndToStart -> listOf(accent.copy(alpha = PlayerDimens.QueueSwipeFadeAlpha), accent)
+        SwipeToDismissBoxValue.Settled -> listOf(Color.Transparent, Color.Transparent)
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = side)
+            .clip(RoundedCornerShape(PlayerDimens.QueueSwipeCorner))
+            .background(Brush.horizontalGradient(colors)),
+        contentAlignment = if (direction == SwipeToDismissBoxValue.StartToEnd) Alignment.CenterStart else Alignment.CenterEnd
+    ) {
+        when (direction) {
+            SwipeToDismissBoxValue.StartToEnd -> Icon(
+                imageVector = SpectroIcons.Delete,
+                contentDescription = stringResource(R.string.queue_remove),
+                tint = MaterialTheme.colorScheme.onError,
+                modifier = Modifier
+                    .padding(start = PlayerDimens.QueueSwipeIconSide)
+                    .size(PlayerDimens.QueueSwipeIcon)
+            )
+            SwipeToDismissBoxValue.EndToStart -> Icon(
+                imageVector = SpectroIcons.PlaylistPlay,
+                contentDescription = stringResource(R.string.queue_play_next),
+                tint = MaterialTheme.colorScheme.background,
+                modifier = Modifier
+                    .padding(end = PlayerDimens.QueueSwipeIconSide)
+                    .size(PlayerDimens.QueueSwipeIcon)
+            )
+            SwipeToDismissBoxValue.Settled -> Unit
+        }
+    }
+}
+
+// A song of the queue, the one that plays lighter with its state at the end, the others with the handle that drags them
+@Composable
+private fun QueueItem(
+    entry: QueueEntry,
+    isCurrent: Boolean,
+    isHistory: Boolean,
+    indicator: QueueIndicator,
+    showHandle: Boolean,
+    isCompact: Boolean,
+    modifier: Modifier = Modifier,
+    accent: Color,
+    isSelected: Boolean?,
+    onClick: () -> Unit,
+    onMoreClick: () -> Unit
+) {
+    val track = entry.track
+    // Lying down the songs are over the backdrop, only the one that plays has a card
+    val background by animateColorAsState(
+        targetValue = when {
+            isCompact && isCurrent -> SpectroTheme.colors.onMedia.copy(alpha = PlayerDimens.QueueItemCurrentAlpha)
+            isCompact -> Color.Transparent
+            isCurrent -> MaterialTheme.colorScheme.surface
+            else -> MaterialTheme.colorScheme.surfaceVariant
+        },
+        label = "QueueItemBackground"
+    )
+    val length = track.durationMs.takeIf { it > 0 }?.let { formatTime(it / MillisPerSecond) }
+    val artist = track.artistLine()
+    val subtitle = when {
+        artist != null && length != null -> "$artist \u2022 $length"
+        else -> artist ?: length.orEmpty()
+    }
+
+    // When the handle goes away, with the shuffle on or the queue locked, its room closes, so the menu moves to the end and the words grow into what was left
+    // They come back as the handle does, the song that plays keeps its state there
+    val slotWidth by animateDpAsState(
+        targetValue = if (showHandle || isCurrent) PlayerDimens.QueueIndicatorStart + PlayerDimens.QueueIndicator else PlayerDimens.None,
+        animationSpec = tween(SpectroMotion.ExpandMillis),
+        label = "QueueIndicatorSlot"
+    )
+    val handleAlpha by animateFloatAsState(
+        targetValue = if (showHandle) PlayerDimens.QueueHandleAlpha else 0f,
+        animationSpec = tween(SpectroMotion.ExpandMillis),
+        label = "QueueHandleAlpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = if (isCompact) PlayerDimens.None else PlayerDimens.QueueItemSide)
+            .clip(RoundedCornerShape(PlayerDimens.QueueItemCorner))
+            .background(background)
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isCompact) {
+                        Modifier.padding(
+                            start = PlayerDimens.LandscapeSideInset,
+                            end = PlayerDimens.QueueItemEndLandscape,
+                            top = PlayerDimens.QueueItemPaddingLandscape,
+                            bottom = PlayerDimens.QueueItemPaddingLandscape
+                        )
+                    } else {
+                        Modifier.padding(PlayerDimens.QueueItemPadding)
+                    }
+                )
+                .graphicsLayer { alpha = if (isHistory) PlayerDimens.QueueHistoryAlpha else 1f },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // While songs are being marked, the box comes before the cover and the whole row marks or unmarks
+            if (isSelected != null) {
+                Checkbox(
+                    checked = isSelected,
+                    onCheckedChange = null,
+                    colors = CheckboxDefaults.colors(checkedColor = accent),
+                    modifier = Modifier.padding(end = PlayerDimens.QueueCheckboxEnd)
+                )
+            }
+
+            TrackCover(track = track, size = if (isCompact) PlayerDimens.QueueCoverLandscape else PlayerDimens.QueueCover)
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = if (isCompact) PlayerDimens.QueueTextSideLandscape else PlayerDimens.QueueTextSide)
+            ) {
+                Text(
+                    text = track.title,
+                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                    color = if (isCurrent) accent else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DownloadedMark(track.id)
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isCurrent) 1f else PlayerDimens.QueueArtistAlpha),
+                        maxLines = 1,
+                        modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
+                    )
+                }
+            }
+
+            // The menu of a song is left out while marking, the whole row has one job
+            if (isSelected == null) {
+                IconButton(onClick = onMoreClick, modifier = Modifier.size(PlayerDimens.QueueMore)) {
+                    Icon(
+                        imageVector = SpectroIcons.MoreVertical,
+                        contentDescription = stringResource(R.string.queue_song_options),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(PlayerDimens.QueueMoreIcon)
+                    )
+                }
+            }
+
+            // The room of the state or of the handle, its width follows the slot so the words and the menu take what it leaves
+            Box(
+                modifier = Modifier
+                    .width(slotWidth)
+                    .height(PlayerDimens.QueueIndicator)
+                    .clipToBounds(),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                Box(modifier = Modifier.requiredSize(PlayerDimens.QueueIndicator), contentAlignment = Alignment.Center) {
+                    if (isCurrent) {
+                        AnimatedContent(targetState = indicator, label = "QueueIndicator") { state ->
+                            when (state) {
+                                QueueIndicator.Loading -> CircularProgressIndicator(
+                                    modifier = Modifier.size(PlayerDimens.QueueLoadingIcon),
+                                    color = accent,
+                                    strokeWidth = PlayerDimens.QueueLoadingStroke
+                                )
+                                QueueIndicator.Playing -> EqualizerBars(accent)
+                                QueueIndicator.Paused -> Icon(
+                                    imageVector = SpectroIcons.PlayArrow,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(PlayerDimens.QueueIndicatorIcon)
+                                )
+                            }
+                        }
+                    } else if (handleAlpha > 0f) {
+                        // It fades out and in as the room closes and opens, and only drags while it is the handle
+                        Icon(
+                            imageVector = SpectroIcons.DragHandle,
+                            contentDescription = stringResource(R.string.queue_reorder),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = handleAlpha),
+                            modifier = (if (showHandle) modifier else Modifier).size(PlayerDimens.QueueIndicatorIcon)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Cover of a song with the note of the player under it until the picture arrives, a video cut square and marked with a camera
+@Composable
+internal fun TrackCover(
+    track: PlayableTrack,
+    size: Dp,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val cover = remember(track.artworkUrl) {
+        track.artworkUrl?.let { url ->
+            ImageRequest.Builder(context)
+                .data(url.resize(PlayerDimens.QueueCoverRequestSize, PlayerDimens.QueueCoverRequestSize))
+                .apply { if (url.isVideoThumbnail()) transformations(VideoSquareCrop) }
+                .build()
+        }
+    }
+
+    Box(
+        modifier = modifier
+            .size(size)
+            .clip(RoundedCornerShape(PlayerDimens.QueueCoverCorner))
+    ) {
+        AlbumPlaceholder()
+        AsyncImage(
+            model = cover,
+            contentDescription = null,
+            contentScale = ContentScale.Crop,
+            modifier = Modifier.fillMaxSize()
+        )
+        if (track.isVideo) {
+            VideoBadge(
+                iconSize = PlayerDimens.QueueVideoBadgeIcon,
+                padding = PlayerDimens.QueueVideoBadgePadding,
+                modifier = Modifier.padding(PlayerDimens.QueueVideoBadgeInset)
+            )
+        }
+    }
+}
+
+// Three bars that rise and fall while the song plays, moved only when drawn
+@Composable
+private fun EqualizerBars(color: Color) {
+    val transition = rememberInfiniteTransition(label = "Equalizer")
+
+    Row(
+        modifier = Modifier.size(PlayerDimens.EqualizerSize),
+        horizontalArrangement = Arrangement.spacedBy(PlayerDimens.EqualizerGap),
+        verticalAlignment = Alignment.Bottom
+    ) {
+        PlayerDimens.EqualizerBars.forEach { (lowest, millis) ->
+            val factor by transition.animateFloat(lowest, 1f, infiniteRepeatable(tween(millis), AnimationRepeat.Reverse), label = "EqualizerBar")
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(PlayerDimens.EqualizerBarHeight)
+                    .graphicsLayer {
+                        scaleY = factor
+                        transformOrigin = TransformOrigin(0.5f, 1f)
+                    }
+                    .background(color, RoundedCornerShape(PlayerDimens.EqualizerBarCorner))
+            )
+        }
+    }
+}
+
+// Circle at the end of the list, spinning while more songs come
+@Composable
+private fun LoadMoreSpinner(accent: Color) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = PlayerDimens.QueueSpinnerPadding),
+        contentAlignment = Alignment.Center
+    ) {
+        CircularProgressIndicator(
+            modifier = Modifier.size(PlayerDimens.QueueSpinner),
+            color = accent,
+            strokeWidth = PlayerDimens.QueueSpinnerStroke
+        )
+    }
+}
+
+// The room of a bar of the queue, lying down on the line of shuffle and repeat with the backdrop behind it
+private fun Modifier.queueBarRoom(frame: LandscapeFrame?, background: Color): Modifier = this
+    // Touches on the bar never reach the songs scrolled behind it
+    .pointerInput(Unit) {}
+    .then(
+        if (frame != null) {
+            Modifier
+                .padding(bottom = frame.queueBarBottom)
+                .height(PlayerDimens.LandscapeToolButton)
+        } else {
+            Modifier
+                .background(background)
+                .navigationBarsPadding()
+                .height(PlayerDimens.QueueBarHeight)
+                .padding(horizontal = PlayerDimens.QueueBarSide)
+        }
+    )
+
+// Bar at the bottom of the queue with shuffle and repeat
+@Composable
+private fun QueueBar(
+    frame: LandscapeFrame?,
+    repeatMode: com.spectro.app.core.playback.RepeatMode,
+    isShuffleActive: Boolean,
+    isLocked: Boolean,
+    accent: Color,
+    onLockToggle: () -> Unit,
+    onSelectClick: () -> Unit,
+    onSearchClick: () -> Unit,
+    onShareClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = PlayerDimens.ToolbarInactiveAlpha)
+
+    // Lying down shuffle and repeat are already with the controls, so the bar has the lock and the tools only, together at its end
+    if (frame != null) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = modifier.queueBarRoom(frame, MaterialTheme.colorScheme.background)
+        ) {
+            Spacer(Modifier.weight(1f))
+            Row(Modifier.offset(x = PlayerDimens.QueueBarToolsShift)) {
+                ToggleButton(if (isLocked) SpectroIcons.Lock else SpectroIcons.LockOpen, isLocked, onLockToggle, inactive, accent, PlayerDimens.LandscapeToolButton, PlayerDimens.LandscapeToolIcon)
+                ToggleButton(SpectroIcons.Checklist, false, onSelectClick, inactive, accent, PlayerDimens.LandscapeToolButton, PlayerDimens.LandscapeToolIcon)
+                ToggleButton(SpectroIcons.Search, false, onSearchClick, inactive, accent, PlayerDimens.LandscapeToolButton, PlayerDimens.LandscapeToolIcon)
+                ToggleButton(SpectroIcons.Share, false, onShareClick, inactive, accent, PlayerDimens.LandscapeToolButton, PlayerDimens.LandscapeToolIcon)
+            }
+        }
+        return
+    }
+
+    Box(
+        modifier = modifier.queueBarRoom(frame, MaterialTheme.colorScheme.background)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Modes on the start, tools on the end
+            ToggleButton(SpectroIcons.Shuffle, isShuffleActive, PlayerConnection::toggleShuffle, inactive, accent)
+            RepeatButton(repeatMode, PlayerConnection::toggleRepeat, inactive, accent)
+            Spacer(Modifier.weight(1f))
+            ToggleButton(SpectroIcons.Checklist, false, onSelectClick, inactive, accent)
+            ToggleButton(SpectroIcons.Search, false, onSearchClick, inactive, accent)
+            ToggleButton(SpectroIcons.Share, false, onShareClick, inactive, accent)
+        }
+    }
+}
+
+// Bar of the selection, the actions for the marked songs, shown only while there are some
+@Composable
+private fun SelectionBar(
+    frame: LandscapeFrame?,
+    hasSelection: Boolean,
+    canPlayNext: Boolean,
+    canSave: Boolean,
+    canRemove: Boolean,
+    accent: Color,
+    onPlayNext: () -> Unit,
+    onSave: () -> Unit,
+    onShare: () -> Unit,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val inactive = MaterialTheme.colorScheme.onSurface.copy(alpha = PlayerDimens.ToolbarInactiveAlpha)
+
+    Box(
+        modifier = modifier.queueBarRoom(frame, MaterialTheme.colorScheme.background),
+        // Lying down the start of its line has shuffle, repeat and favorite
+        contentAlignment = if (frame != null) Alignment.CenterEnd else Alignment.Center
+    ) {
+        if (hasSelection) {
+            val buttonSize = if (frame != null) PlayerDimens.LandscapeToolButton else PlayerDimens.ToolbarButton
+            val iconSize = if (frame != null) PlayerDimens.LandscapeToolIcon else PlayerDimens.ToolbarIcon
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(if (frame != null) PlayerDimens.None else PlayerDimens.QueueSelectionGap),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (canPlayNext) ToggleButton(SpectroIcons.PlaylistPlay, false, onPlayNext, inactive, accent, buttonSize, iconSize)
+                if (canSave) ToggleButton(SpectroIcons.PlaylistAdd, false, onSave, inactive, accent, buttonSize, iconSize)
+                ToggleButton(SpectroIcons.Share, false, onShare, inactive, accent, buttonSize, iconSize)
+                if (canRemove) ToggleButton(SpectroIcons.Delete, false, onRemove, inactive, accent, buttonSize, iconSize)
+            }
+        } else {
+            Text(
+                text = stringResource(R.string.queue_select_hint),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+// Header of the selection, how many songs are marked, with the buttons to leave it and to mark all of them or none
+@Composable
+private fun SelectionHeader(
+    frame: LandscapeFrame?,
+    count: Int,
+    allSelected: Boolean,
+    accent: Color,
+    onExit: () -> Unit,
+    onToggleAll: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (frame != null) {
+                    Modifier.sideHeader(frame)
+                } else {
+                    Modifier
+                        .windowInsetsPadding(WindowInsets.displayCutout)
+                        .padding(PlayerDimens.QueueHeaderPadding)
+                }
+            ),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        IconButton(onClick = onExit, modifier = if (frame != null) Modifier.offset(x = PlayerDimens.QueueExitShift) else Modifier) {
+            Icon(SpectroIcons.Close, stringResource(R.string.queue_selection_exit), tint = accent)
+        }
+        Text(
+            text = pluralStringResource(R.plurals.queue_selected, count, count),
+            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold, fontSize = PlayerDimens.QueueTitleSize),
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        IconButton(onClick = onToggleAll) {
+            Icon(
+                imageVector = SpectroIcons.Checklist,
+                contentDescription = stringResource(if (allSelected) R.string.queue_select_none else R.string.queue_select_all),
+                tint = if (allSelected) accent else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+// Field that filters the queue, with a button that clears the search and closes it, focused when it opens
+@Composable
+private fun QueueSearchField(
+    frame: LandscapeFrame?,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    accent: Color,
+    progress: Float,
+    onClose: () -> Unit
+) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focus.requestFocus() }
+
+    Box(
+        contentAlignment = Alignment.CenterEnd,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (frame != null) {
+                    Modifier.padding(top = frame.barTop, end = frame.toolsRoom, bottom = PlayerDimens.QueueItemGap)
+                } else {
+                    Modifier.padding(horizontal = PlayerDimens.QueueItemSide, vertical = PlayerDimens.QueueItemGap)
+                }
+            )
+    ) {
+    // Lying down the field is as tall as the line it sits on, the field of Material is never shorter than its own minimum, so it is drawn with its look and a height of its own
+    if (frame != null) {
+        val interactionSource = remember { MutableInteractionSource() }
+        BasicTextField(
+            value = query,
+            onValueChange = onQueryChange,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            interactionSource = interactionSource,
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+            modifier = Modifier
+                .fillMaxWidth(progress)
+                .height(PlayerDimens.QueueSearchHeightLandscape)
+                .clipToBounds()
+                .alpha((progress / PlayerDimens.QueueSearchFadeFraction).coerceIn(0f, 1f))
+                .focusRequester(focus)
+        ) { innerTextField ->
+            OutlinedTextFieldDefaults.DecorationBox(
+                value = query,
+                innerTextField = innerTextField,
+                enabled = true,
+                singleLine = true,
+                visualTransformation = VisualTransformation.None,
+                interactionSource = interactionSource,
+                placeholder = { Text(stringResource(R.string.queue_search_hint), style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false) },
+                leadingIcon = {
+                    IconButton(onClick = onClose, modifier = Modifier.size(PlayerDimens.QueueSearchButtonLandscape)) {
+                        Icon(SpectroIcons.Back, contentDescription = stringResource(R.string.queue_search_close), tint = accent)
+                    }
+                },
+                trailingIcon = {
+                    if (query.isNotEmpty()) {
+                        IconButton(onClick = { onQueryChange("") }, modifier = Modifier.size(PlayerDimens.QueueSearchButtonLandscape)) {
+                            Icon(SpectroIcons.Close, contentDescription = stringResource(R.string.queue_search_clear))
+                        }
+                    }
+                },
+                contentPadding = OutlinedTextFieldDefaults.contentPadding(top = PlayerDimens.None, bottom = PlayerDimens.None),
+                container = {
+                    OutlinedTextFieldDefaults.Container(
+                        enabled = true,
+                        isError = false,
+                        interactionSource = interactionSource,
+                        shape = RoundedCornerShape(PlayerDimens.QueueSearchCorner)
+                    )
+                }
+            )
+        }
+    } else OutlinedTextField(
+        value = query,
+        onValueChange = onQueryChange,
+        placeholder = { Text(stringResource(R.string.queue_search_hint), maxLines = 1, softWrap = false) },
+        leadingIcon = {
+            IconButton(onClick = onClose) {
+                Icon(SpectroIcons.Back, contentDescription = stringResource(R.string.queue_search_close), tint = accent)
+            }
+        },
+        // Clearing is for what was typed, leaving the search is the arrow at the start
+        trailingIcon = {
+            if (query.isNotEmpty()) {
+                IconButton(onClick = { onQueryChange("") }) {
+                    Icon(SpectroIcons.Close, contentDescription = stringResource(R.string.queue_search_clear))
+                }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(PlayerDimens.QueueSearchCorner),
+        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+        modifier = Modifier
+            .fillMaxWidth(progress)
+            .clipToBounds()
+            .alpha((progress / PlayerDimens.QueueSearchFadeFraction).coerceIn(0f, 1f))
+            .focusRequester(focus)
+    )
+    }
+}
+
+// Text with the accents and the case taken out, so a search finds songs whatever way they were typed
+private fun String.fold(): String =
+    Normalizer.normalize(trim(), Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase()
+
+// Shares the songs as lines with the title, the artist and the YouTube Music link, through the apps of the device
+private fun shareQueue(context: Context, songs: List<PlayableTrack>) {
+    if (songs.isEmpty()) {
+        Toasts.show(context.getString(R.string.player_share_empty), isError = true)
+        return
+    }
+
+    val text = songs.joinToString("\n\n") { song ->
+        listOfNotNull(song.title, song.artist, "$MusicOrigin/watch?v=${song.id}").joinToString("\n")
+    }
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, text)
+    }
+    context.startActivity(Intent.createChooser(intent, context.getString(R.string.player_share_via)))
+}
+
+// Note and a hint when nothing is in the queue
+@Composable
+private fun EmptyQueue() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(PlayerDimens.QueueEmptyPadding),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Icon(
+            imageVector = SpectroIcons.QueueMusic,
+            contentDescription = null,
+            modifier = Modifier.size(PlayerDimens.QueueEmptyIcon),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = PlayerDimens.QueueEmptyIconAlpha)
+        )
+        Spacer(Modifier.height(PlayerDimens.QueueEmptyGap))
+        Text(
+            text = stringResource(R.string.queue_empty_title),
+            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.SemiBold),
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = stringResource(R.string.queue_empty_subtitle),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center
+        )
+    }
+}

@@ -1,0 +1,510 @@
+package com.spectro.app.features.library.ui
+
+// Android application and view model
+import android.app.Application
+import androidx.annotation.StringRes
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+// Coroutines and reactive flows
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+// Text order and language
+import java.text.Collator
+import java.util.Locale
+// Project resources
+import com.spectro.app.R
+import com.spectro.app.core.innertube.MusicOrigin
+import com.spectro.app.core.innertube.currentSession
+import com.spectro.app.core.innertube.InnerTubeClient
+import com.spectro.app.features.collection.data.CollectionKind
+import com.spectro.app.features.collection.data.CollectionRepository
+import com.spectro.app.features.collection.ui.CollectionDimens
+import com.spectro.app.features.home.data.HomeItem
+import com.spectro.app.features.home.data.HomeItemKind
+import com.spectro.app.features.home.data.PlaylistPagePrefix
+import com.spectro.app.features.library.data.LibraryRepository
+import com.spectro.app.features.library.data.LibraryPage
+import com.spectro.app.features.library.data.LibrarySortOption
+import com.spectro.app.features.library.data.LibrarySource
+import com.spectro.app.features.library.data.LibraryStore
+import com.spectro.app.features.playlist.data.PlaylistChanges
+import com.spectro.app.features.settings.data.ContentPrefs
+import com.spectro.app.features.playlist.data.PlaylistEvent
+import com.spectro.app.features.playlist.data.PlaylistRepository
+
+// The buttons of the top of the library, each has one list or, when it has more, a row of them that shows once it is chosen
+enum class LibraryGroup(@StringRes val titleRes: Int, val sources: List<LibrarySource>, @StringRes val sourceTitles: List<Int>) {
+    Device(R.string.library_device, emptyList(), emptyList()),
+    Playlists(R.string.library_playlists, listOf(LibrarySource.Playlists), listOf(R.string.library_playlists)),
+    Songs(R.string.library_songs, listOf(LibrarySource.Songs), listOf(R.string.library_songs)),
+    Albums(R.string.library_albums, listOf(LibrarySource.Albums), listOf(R.string.library_albums)),
+    Artists(
+        R.string.library_artists,
+        listOf(LibrarySource.Artists, LibrarySource.Subscriptions),
+        listOf(R.string.library_artists, R.string.library_subscriptions)
+    )
+}
+
+// The ways to put a list in order, with the words that say it above the list and the short word of its button in the sheet
+enum class LibrarySort(@StringRes val titleRes: Int, @StringRes val wordRes: Int = titleRes) {
+    // The order a list comes in from YouTube Music
+    Recent(R.string.library_sort_recent),
+    Saved(R.string.library_sort_saved),
+
+    // The ones that go two ways, the pairs of what a list can be put in order by
+    AToZ(R.string.library_sort_a_to_z, R.string.library_sort_word_a_to_z),
+    ZToA(R.string.library_sort_z_to_a, R.string.library_sort_word_z_to_a),
+    ArtistAToZ(R.string.library_sort_artist_a_to_z, R.string.library_sort_word_a_to_z),
+    ArtistZToA(R.string.library_sort_artist_z_to_a, R.string.library_sort_word_z_to_a),
+    Longest(R.string.library_sort_longest, R.string.library_sort_word_longest),
+    Shortest(R.string.library_sort_shortest, R.string.library_sort_word_shortest),
+    Newest(R.string.library_sort_newest, R.string.library_sort_word_newest),
+    Oldest(R.string.library_sort_oldest, R.string.library_sort_word_oldest),
+    Largest(R.string.library_sort_largest, R.string.library_sort_word_largest),
+    Smallest(R.string.library_sort_smallest, R.string.library_sort_word_smallest),
+    MostSongs(R.string.library_sort_most_songs, R.string.library_sort_word_most),
+    FewestSongs(R.string.library_sort_fewest_songs, R.string.library_sort_word_fewest),
+    YearNewest(R.string.library_sort_year_newest, R.string.library_sort_word_year_newest),
+    YearOldest(R.string.library_sort_year_oldest, R.string.library_sort_word_year_oldest)
+}
+
+// What a list can be put in order by and its two ways, a tap on its name picks the first
+enum class LibrarySortKind(@StringRes val titleRes: Int, val first: LibrarySort, val second: LibrarySort) {
+    Name(R.string.library_sort_name, LibrarySort.AToZ, LibrarySort.ZToA),
+    Artist(R.string.library_sort_artist, LibrarySort.ArtistAToZ, LibrarySort.ArtistZToA),
+    Length(R.string.library_sort_length, LibrarySort.Longest, LibrarySort.Shortest),
+    Date(R.string.library_sort_date, LibrarySort.Newest, LibrarySort.Oldest),
+    FileSize(R.string.library_sort_size, LibrarySort.Largest, LibrarySort.Smallest),
+    SongCount(R.string.library_sort_song_count, LibrarySort.MostSongs, LibrarySort.FewestSongs),
+    Year(R.string.library_sort_year, LibrarySort.YearNewest, LibrarySort.YearOldest)
+}
+
+// The order of names in the language of the app, an accent or a capital does not move a name away from its letter
+internal fun nameOrder(): Collator = Collator.getInstance(Locale.getDefault()).apply { strength = Collator.PRIMARY }
+
+// The year in the line of an album, the last one so the name of an artist does not count, and the number of songs a playlist starts its line with, which is not a number of views such as 46K
+private val YearPattern = Regex("\\b(?:19|20)\\d\\d\\b")
+private val CountPattern = Regex("^\\d{1,3}(?:[.,]\\d{3})*(?=\\s)")
+
+// What a list is doing, waiting for the answer, showing it or failed
+enum class LibraryStatus { Loading, Content, Error }
+
+// Everything the library draws
+data class LibraryUiState(
+    // The button of the top that is on, none shows the list of what was used lately
+    val group: LibraryGroup? = null,
+    val source: LibrarySource = LibrarySource.Recent,
+    val status: LibraryStatus = LibraryStatus.Loading,
+    val items: List<HomeItem> = emptyList(),
+    val continuation: String? = null,
+    val isLoadingMore: Boolean = false,
+    val sort: LibrarySort = LibrarySort.Recent,
+    val isGrid: Boolean = false,
+    // The words typed in the search, none while the search is closed
+    val query: String? = null,
+    // The orders that YouTube Music offers for the list in use and the one that is on, empty until the list says them
+    val remoteSorts: List<LibrarySortOption> = emptyList(),
+    val remoteSelected: String? = null,
+    // True while the list is pulled to be asked again
+    val isRefreshing: Boolean = false
+) {
+    // The order the list comes in, for when YouTube Music does not say the ones it has, what is downloaded or on the phone has none of its own
+    val sorts: List<LibrarySort>
+        get() = when {
+            group == LibraryGroup.Device -> emptyList()
+            source == LibrarySource.Recent -> listOf(LibrarySort.Recent)
+            else -> listOf(LibrarySort.Saved)
+        }
+
+    // What the list in use can be put in order by, a list of many kinds only has the name, and the artist or the length mean nothing for a list of artists
+    val kinds: List<LibrarySortKind>
+        get() = when {
+            group == LibraryGroup.Device -> listOf(LibrarySortKind.Date, LibrarySortKind.FileSize, LibrarySortKind.Name)
+            source == LibrarySource.Songs -> listOf(LibrarySortKind.Name, LibrarySortKind.Artist, LibrarySortKind.Length)
+            source == LibrarySource.Albums -> listOf(LibrarySortKind.Name, LibrarySortKind.Artist, LibrarySortKind.Year)
+            source == LibrarySource.Playlists -> listOf(LibrarySortKind.Name, LibrarySortKind.SongCount)
+            else -> listOf(LibrarySortKind.Name)
+        }
+
+    // The orders made here, and whether one of them is in use
+    val localSorts: List<LibrarySort>
+        get() = kinds.flatMap { listOf(it.first, it.second) }
+    val isLocalOrder: Boolean
+        get() = sort in localSorts
+
+    // The ones the sheet offers, an order that the items of the list say nothing about is left out
+    val offeredKinds: List<LibrarySortKind>
+        get() = kinds.filter { kind ->
+            sort == kind.first || sort == kind.second || when (kind) {
+                LibrarySortKind.Artist -> items.any { artistOf(it) != null }
+                LibrarySortKind.Length -> items.any { it.durationSeconds != null }
+                LibrarySortKind.SongCount -> items.any { songsOf(it) != null }
+                LibrarySortKind.Year -> items.any { yearOf(it) != null }
+                else -> true
+            }
+        }
+
+    // The order of YouTube Music that does the same as one made here, it reaches the whole list without having to read it
+    fun remoteOf(order: LibrarySort): LibrarySortOption? = when (order) {
+        LibrarySort.AToZ -> remoteSorts.firstOrNull { it.isAToZ }
+        LibrarySort.ZToA -> remoteSorts.firstOrNull { it.isZToA }
+        else -> null
+    }
+
+    // What the orders look at in an item, none when the list does not say
+    private fun artistOf(item: HomeItem): String? = (item.artists.firstOrNull() ?: item.author)?.takeIf { it.isNotBlank() }
+    private fun yearOf(item: HomeItem): Int? = item.lineText?.let { line -> YearPattern.findAll(line).lastOrNull()?.value?.toIntOrNull() }
+    private fun songsOf(item: HomeItem): Int? = item.countText?.let { CountPattern.find(it)?.value?.filter(Char::isDigit)?.toIntOrNull() }
+
+    // The items in the order that was chosen, an item with nothing to be ordered by goes last in both ways
+    private val ordered: List<HomeItem> by lazy {
+        val names = nameOrder()
+        when (sort) {
+            LibrarySort.AToZ -> items.sortedWith(compareBy(names) { it.title })
+            LibrarySort.ZToA -> items.sortedWith(compareByDescending(names) { it.title })
+            LibrarySort.ArtistAToZ -> items.sortedWith(compareBy<HomeItem, String?>(nullsLast<String>(names)) { artistOf(it) }.thenBy(names) { it.title })
+            LibrarySort.ArtistZToA -> items.sortedWith(compareBy<HomeItem, String?>(nullsLast<String>(names.reversed())) { artistOf(it) }.thenBy(names) { it.title })
+            LibrarySort.Longest -> items.sortedWith(compareBy(nullsLast(reverseOrder<Int>())) { it.durationSeconds })
+            LibrarySort.Shortest -> items.sortedWith(compareBy(nullsLast(naturalOrder<Int>())) { it.durationSeconds })
+            LibrarySort.MostSongs -> items.sortedWith(compareBy(nullsLast(reverseOrder<Int>())) { songsOf(it) })
+            LibrarySort.FewestSongs -> items.sortedWith(compareBy(nullsLast(naturalOrder<Int>())) { songsOf(it) })
+            LibrarySort.YearNewest -> items.sortedWith(compareBy(nullsLast(reverseOrder<Int>())) { yearOf(it) })
+            LibrarySort.YearOldest -> items.sortedWith(compareBy(nullsLast(naturalOrder<Int>())) { yearOf(it) })
+            else -> items
+        }
+    }
+
+    // What the list shows, in that order, without what is hidden and with only what the search finds
+    val shown: List<HomeItem>
+        get() {
+            val visible = if (group == LibraryGroup.Device) ordered else ordered.filterNot(ContentPrefs::isHiddenInLibrary)
+            val words = query?.trim().orEmpty()
+            return if (words.isEmpty()) visible else visible.filter { item -> listOfNotNull(item.title, item.lineText, item.countText).any { it.contains(words, ignoreCase = true) } }
+        }
+}
+
+// Loads the lists of the library as the buttons are chosen, the next pages near the end, and keeps the choice of order and of how it is drawn
+class LibraryViewModel(application: Application) : AndroidViewModel(application) {
+    private val repository = LibraryRepository(application)
+    private val collections = CollectionRepository(application)
+    private val store = LibraryStore(application)
+    private val playlists = PlaylistRepository(application)
+    private val mutableState = MutableStateFlow(LibraryUiState())
+    val state: StateFlow<LibraryUiState> = mutableState.asStateFlow()
+
+    private var job: Job? = null
+
+    // The order of YouTube Music that was chosen last time, asked again as soon as the list says its orders
+    private var pendingRemote: String? = null
+
+    // Opens in the button and the list that were on the last time
+    init {
+        viewModelScope.launch {
+            val (savedGroup, savedSource) = store.read()
+            val group = LibraryGroup.entries.firstOrNull { it.name == savedGroup }
+            val source = group?.sources?.firstOrNull { it.name == savedSource } ?: group?.sources?.firstOrNull()
+
+            if (group != null) {
+                mutableState.update { it.copy(group = group, source = source ?: it.source, sort = defaultSort(source ?: it.source)) }
+            }
+            if (source != null || group == null) {
+                restoreSort(sortKeyOf(mutableState.value))
+                load()
+            } else {
+                mutableState.update { it.copy(status = LibraryStatus.Content, sort = LibrarySort.Newest) }
+                restoreSort(sortKeyOf(mutableState.value))
+            }
+        }
+
+        // A playlist made, changed or deleted anywhere shows in the list
+        viewModelScope.launch {
+            PlaylistChanges.version.drop(1).collect { refresh() }
+        }
+
+        // A song that lost its like leaves the list of the songs before the answer comes
+        viewModelScope.launch {
+            PlaylistChanges.events.collect { event ->
+                // A playlist just made is asked for as if the list was pulled down, without the indicator, and again if it is not there yet
+                if (event is PlaylistEvent.Created) {
+                    viewModelScope.launch {
+                        delay(CreatedRefreshMillis)
+                        pullRefresh(isVisible = false)
+                        delay(CreatedRetryMillis)
+                        if (mutableState.value.items.none { it.id.removePrefix(PlaylistPagePrefix) == event.playlistId }) pullRefresh(isVisible = false)
+                    }
+                }
+                if (event is PlaylistEvent.LikeChanged && !event.isLiked && mutableState.value.source == LibrarySource.Songs) {
+                    val song = mutableState.value.items.firstOrNull { it.id == event.videoId }
+                    mutableState.update { current -> current.copy(items = current.items.filterNot { it.id == event.videoId }) }
+
+                    // The library keeps a song that lost its like, so it is taken out of it too, or it would come back when the list is asked again
+                    val token = song?.libraryRemoveToken
+                    if (token != null && !event.leftLibrary) {
+                        viewModelScope.launch {
+                            InnerTubeClient.feedback(currentSession(getApplication()), listOf(token))
+                            PlaylistChanges.notifyChanged()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Turns a button of the top on, or off when it was on
+    fun selectGroup(group: LibraryGroup) {
+        val source = group.sources.firstOrNull()
+        mutableState.update {
+            it.copy(group = group, source = source ?: it.source, sort = defaultSort(source ?: it.source), items = emptyList(), continuation = null, remoteSorts = emptyList(), remoteSelected = null)
+        }
+        saveChoice()
+        if (source != null) {
+            open(source)
+        } else {
+            mutableState.update { it.copy(status = LibraryStatus.Content, sort = LibrarySort.Newest) }
+            viewModelScope.launch { restoreSort(sortKeyOf(mutableState.value)) }
+        }
+    }
+
+    // Goes to another list of the same button, such as the channels of the podcasts
+    fun selectSource(source: LibrarySource) {
+        mutableState.update { it.copy(source = source, sort = defaultSort(source), items = emptyList(), continuation = null, remoteSorts = emptyList(), remoteSelected = null) }
+        saveChoice()
+        open(source)
+    }
+
+    // Back to what was used lately
+    fun clear() {
+        mutableState.update { it.copy(group = null, source = LibrarySource.Recent, sort = LibrarySort.Recent, items = emptyList(), continuation = null, remoteSorts = emptyList(), remoteSelected = null) }
+        saveChoice()
+        open(LibrarySource.Recent)
+    }
+
+    fun selectSort(sort: LibrarySort) {
+        mutableState.update { it.copy(sort = sort) }
+        saveSort(LocalPrefix + sort.name)
+
+        // The list stays under its placeholder while the rest of it comes
+        val current = mutableState.value
+        if (current.continuation == null || !current.isLocalOrder) return
+        job?.cancel()
+        mutableState.update { it.copy(status = LibraryStatus.Loading, isLoadingMore = false) }
+        job = viewModelScope.launch {
+            val whole = wholeOf(LibraryPage(items = current.items, continuation = current.continuation))
+            mutableState.update { it.copy(status = LibraryStatus.Content, items = whole.items.distinctBy { item -> item.id }, continuation = whole.continuation) }
+        }
+    }
+
+    // An order made here needs the whole list, or it would only put in order the pages that came and move what is on the screen as the next ones come
+    private suspend fun wholeOf(first: LibraryPage): LibraryPage {
+        if (!mutableState.value.isLocalOrder) return first
+
+        var items = first.items
+        var continuation = first.continuation
+        var pages = 0
+        while (continuation != null && pages < MaxOrderPages) {
+            val next = repository.more(continuation).getOrNull() ?: break
+            items = items + next.items
+            continuation = next.continuation
+            pages++
+        }
+        return first.copy(items = items, continuation = continuation)
+    }
+
+    // Asks the list again in an order of YouTube Music
+    fun selectRemoteSort(option: LibrarySortOption) {
+        mutableState.update { it.copy(sort = LibrarySort.Recent, remoteSelected = option.title, items = emptyList(), continuation = null) }
+        saveSort(RemotePrefix + option.title)
+        load(option.token)
+    }
+
+    // Opens the search among what is loaded, and closes it
+    fun startSearch() {
+        mutableState.update { it.copy(query = "") }
+    }
+
+    fun setQuery(query: String) {
+        mutableState.update { it.copy(query = query) }
+    }
+
+    fun stopSearch() {
+        mutableState.update { it.copy(query = null) }
+    }
+
+    fun toggleGrid() {
+        mutableState.update { it.copy(isGrid = !it.isGrid) }
+    }
+
+    // Asks the list that is chosen, again after a failure
+    fun load(sortToken: String? = null) {
+        val source = mutableState.value.source
+        job?.cancel()
+        mutableState.update { it.copy(status = LibraryStatus.Loading) }
+        job = viewModelScope.launch {
+            (if (sortToken != null) repository.more(sortToken) else repository.load(source))
+                .onSuccess { first ->
+                    val page = wholeOf(first)
+                    var asked: LibrarySortOption? = null
+                    mutableState.update {
+                        // The orders come with the list asked in its own order, and stay while it is asked in another one
+                        val hasOptions = sortToken == null && it.remoteSorts.isEmpty() && page.sortOptions.isNotEmpty()
+                        it.copy(
+                            status = LibraryStatus.Content,
+                            items = page.items.distinctBy { item -> item.id },
+                            continuation = page.continuation,
+                            remoteSorts = if (hasOptions) page.sortOptions else it.remoteSorts,
+                            remoteSelected = if (hasOptions) (page.sortOptions.firstOrNull { option -> option.isSelected } ?: (page.sortOptions.firstOrNull { option -> option.token == null } ?: page.sortOptions.first())).title else it.remoteSelected
+                        ).also {
+                            // The order chosen last time is asked once the list says which orders it has
+                            if (hasOptions) asked = page.sortOptions.firstOrNull { option -> option.title == pendingRemote && option.token != null }
+                        }
+                    }
+                    pendingRemote = null
+                    asked?.let(::selectRemoteSort)
+                }
+                .onFailure { mutableState.update { it.copy(status = LibraryStatus.Error) } }
+        }
+    }
+
+    // The next page of the list when the end is near
+    fun loadMore() {
+        val current = mutableState.value
+        val token = current.continuation
+        if (token == null || current.isLoadingMore || current.status != LibraryStatus.Content) return
+
+        mutableState.update { it.copy(isLoadingMore = true) }
+        job = viewModelScope.launch {
+            repository.more(token)
+                .onSuccess { page ->
+                    mutableState.update {
+                        val known = it.items.map { item -> item.id }.toSet()
+                        it.copy(items = it.items + page.items.filter { item -> item.id !in known }, continuation = page.continuation, isLoadingMore = false)
+                    }
+                }
+                .onFailure { mutableState.update { it.copy(isLoadingMore = false) } }
+        }
+    }
+
+    // Hands over every song of an album or of a playlist of the list, after asking the rest of a long one
+    fun withTracks(item: HomeItem, action: (List<HomeItem>) -> Unit) {
+        val kind = if (item.kind == HomeItemKind.Album) CollectionKind.Album else CollectionKind.Playlist
+
+        viewModelScope.launch {
+            val page = collections.load(kind, item.id).getOrNull() ?: return@launch
+            var tracks = page.tracks
+            var continuation = page.continuation
+            var pages = 0
+            while (continuation != null && pages < CollectionDimens.MaxPages) {
+                val more = collections.more(continuation).getOrNull() ?: break
+                tracks = tracks + more.tracks
+                continuation = more.continuation
+                pages++
+            }
+            action(tracks.distinctBy { it.id })
+        }
+    }
+
+    // Link of an album or of a playlist on YouTube Music, for sharing
+    fun shareUrl(item: HomeItem): String =
+        if (item.kind == HomeItemKind.Album) "$MusicOrigin/browse/${item.id}" else "$MusicOrigin/playlist?list=${item.id}"
+
+    // Asks the list again and swaps it in without the placeholder, the order of YouTube Music that was chosen is not asked again
+    private fun refresh() {
+        val current = mutableState.value
+        val isDefaultOrder = current.remoteSorts.isEmpty() || current.remoteSorts.firstOrNull { it.token == null }?.title == current.remoteSelected
+        if (current.status != LibraryStatus.Content || !isDefaultOrder) return
+
+        viewModelScope.launch {
+            repository.load(current.source).onSuccess { first ->
+                val page = wholeOf(first)
+                mutableState.update { it.copy(items = page.items.distinctBy { item -> item.id }, continuation = page.continuation) }
+            }
+        }
+    }
+
+    // The list pulled down by the finger, asked again in the order that is on, with the indicator on until the answer comes
+    // The indicator shows only when the finger asked, a refresh the app asks by itself is silent
+    fun pullRefresh(isVisible: Boolean = true) {
+        val current = mutableState.value
+        if (current.status != LibraryStatus.Content || current.isRefreshing) return
+
+        val token = current.remoteSorts.firstOrNull { it.title == current.remoteSelected }?.token
+        if (isVisible) mutableState.update { it.copy(isRefreshing = true) }
+        viewModelScope.launch {
+            (if (token != null) repository.more(token) else repository.load(current.source))
+                .onSuccess { first ->
+                    val page = wholeOf(first)
+                    mutableState.update { it.copy(items = page.items.distinctBy { item -> item.id }, continuation = page.continuation, isRefreshing = false) }
+                }
+                .onFailure { mutableState.update { it.copy(isRefreshing = false) } }
+        }
+    }
+
+    // Deletes a playlist of the account and takes it out of the list
+    fun delete(item: HomeItem, onDone: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            playlists.delete(item.id)
+                .onSuccess { mutableState.update { it.copy(items = it.items.filter { other -> other.id != item.id }) } }
+                .let { onDone(it.isSuccess) }
+        }
+    }
+
+    // Opens a list in the order that was chosen for it the last time
+    private fun open(source: LibrarySource) {
+        viewModelScope.launch {
+            restoreSort(source.name)
+            load()
+        }
+    }
+
+    private suspend fun restoreSort(key: String) {
+        pendingRemote = null
+        val saved = store.readSort(key) ?: return
+
+        when {
+            saved.startsWith(LocalPrefix) -> LibrarySort.entries.firstOrNull { it.name == saved.removePrefix(LocalPrefix) }?.let { sort ->
+                mutableState.update { if (sort in it.sorts || sort in it.localSorts) it.copy(sort = sort) else it }
+            }
+            saved.startsWith(RemotePrefix) -> pendingRemote = saved.removePrefix(RemotePrefix)
+        }
+    }
+
+    // Keeps the order of the list that is on for the next time
+    private fun saveSort(value: String) {
+        val key = sortKeyOf(mutableState.value)
+        viewModelScope.launch { store.saveSort(key, value) }
+    }
+
+    // The name the order of the list in use is kept under, the downloads have no list of YouTube Music
+    private fun sortKeyOf(state: LibraryUiState): String = when (state.group) {
+        LibraryGroup.Device -> DeviceSortKey
+        else -> state.source.name
+    }
+
+    // Keeps the button and the list that are on for the next time
+    private fun saveChoice() {
+        val current = mutableState.value
+        viewModelScope.launch { store.save(current.group?.name, current.source.name.takeIf { current.group != null }) }
+    }
+
+    private fun defaultSort(source: LibrarySource): LibrarySort =
+        if (source == LibrarySource.Recent) LibrarySort.Recent else LibrarySort.Saved
+}
+
+// How the order kept for a list says if it was made here or asked to YouTube Music
+private const val DownloadsSortKey = "downloads"
+private const val DeviceSortKey = "device"
+private const val LocalPrefix = "local:"
+
+// The wait before the list is asked again after a playlist was made, and the one before it is asked once more if the playlist is not there
+private const val CreatedRefreshMillis = 500L
+private const val CreatedRetryMillis = 2_000L
+private const val RemotePrefix = "remote:"
+
+// How many pages are read at most to put a long list in an order made here
+private const val MaxOrderPages = 60
