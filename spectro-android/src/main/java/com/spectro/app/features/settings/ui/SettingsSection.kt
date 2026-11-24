@@ -30,5 +30,5 @@ enum class SettingsGroup(@StringRes val titleRes: Int, val sections: List<Settin
     App(R.string.settings_group_app, listOf(SettingsSection.Appearance, SettingsSection.DesktopSync)),
     Playback(R.string.settings_group_playback, listOf(SettingsSection.Player, SettingsSection.Content)),
     Data(R.string.settings_group_data, listOf(SettingsSection.Storage, SettingsSection.Privacy)),
-    More(R.string.settings_group_more, listOf(SettingsSection.Links, SettingsSection.About))
+    More(R.string.settings_group_more, listOf(SettingsSection.About))
 }

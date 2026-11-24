@@ -74,10 +74,10 @@ function getClientContext() {
 }
 
 // InnerTube POST Helper with SAPISIDHASH authentication support
-async function fetchInnerTube(endpoint, body) {
+async function fetchInnerTube(endpoint, body, overrideCookies = null) {
   const url = `https://music.youtube.com/youtubei/v1/${endpoint}`;
   const sess = loadSession();
-  const cookies = sess?.cookies || "";
+  const cookies = overrideCookies || sess?.cookies || "";
 
   const headers = {
     "Content-Type": "application/json",
@@ -197,27 +197,34 @@ function createWindow() {
     }
   });
 
-  // Intercept YouTube headers to match nocookie origin
+  // Intercept headers for YouTube and Google CDN Media (avatars, playlist covers, album art)
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    const u = details.url;
-    if (u.includes('youtube') || u.includes('googlevideo.com') || u.includes('ytimg.com')) {
+    const u = details.url.toLowerCase();
+    const isImage = details.resourceType === 'image' || u.endsWith('.jpg') || u.endsWith('.jpeg') || u.endsWith('.png') || u.endsWith('.webp') || u.includes('/vi/') || u.includes('=w') || u.includes('=s');
+
+    if (isImage || u.includes('googleusercontent.com') || u.includes('ggpht.com') || u.includes('gstatic.com') || u.includes('ytimg.com')) {
+      for (const k of Object.keys(details.requestHeaders)) {
+        const lk = k.toLowerCase();
+        if (lk === 'origin' || lk === 'referer' || lk === 'sec-fetch-site') {
+          delete details.requestHeaders[k];
+        }
+      }
+    } else if (u.includes('googlevideo.com') || u.includes('youtube.com')) {
       details.requestHeaders['Origin'] = 'https://www.youtube-nocookie.com';
       details.requestHeaders['Referer'] = 'https://www.youtube-nocookie.com/';
     }
     callback({ cancel: false, requestHeaders: details.requestHeaders });
   });
 
-  // Strip restrictive headers and allow nocookie origin
+  // Strip restrictive headers and allow cross-origin for all media & images
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = Object.assign({}, details.responseHeaders);
     delete responseHeaders['x-frame-options'];
     delete responseHeaders['X-Frame-Options'];
     delete responseHeaders['content-security-policy'];
     delete responseHeaders['Content-Security-Policy'];
-    if (details.url.includes('youtube') || details.url.includes('googlevideo.com')) {
-      responseHeaders['access-control-allow-origin'] = ['https://www.youtube-nocookie.com'];
-      responseHeaders['access-control-allow-credentials'] = ['true'];
-    }
+    responseHeaders['access-control-allow-origin'] = ['*'];
+    responseHeaders['access-control-allow-credentials'] = ['true'];
     callback({ cancel: false, responseHeaders });
   });
 
@@ -404,10 +411,12 @@ ipcMain.handle('set_equalizer_gains', async (_, args = {}) => {
 // 2. Music Search & Catalog
 ipcMain.handle('search_music', async (_, args = {}) => {
   const query = args.query || "";
-  return await fetchInnerTube('search', {
+  const body = {
     context: getClientContext(),
     query
-  });
+  };
+  if (args.params) body.params = args.params;
+  return await fetchInnerTube('search', body);
 });
 
 ipcMain.handle('get_radio', async (_, args = {}) => {
@@ -443,7 +452,7 @@ ipcMain.handle('get_explore', async () => {
 
 ipcMain.handle('get_playlist_details', async (_, args = {}) => {
   const rawId = args.browseId || args.browse_id || "";
-  const browseId = rawId.startsWith('VL') || rawId === 'LM' || rawId.startsWith('MPRE') ? rawId : `VL${rawId}`;
+  const browseId = rawId.startsWith('VL') || rawId === 'LM' || rawId.startsWith('MPRE') || rawId.startsWith('UC') || rawId.startsWith('FEmusic_') ? rawId : `VL${rawId}`;
   return await fetchInnerTube('browse', {
     context: getClientContext(),
     browseId
@@ -625,7 +634,7 @@ ipcMain.handle('get_captions_lyrics', async (_, args = {}) => {
   const videoId = args.videoId || args.video_id || "";
   const paramsBytes = Buffer.concat([Buffer.from([0x0a, videoId.length]), Buffer.from(videoId)]);
   const paramsB64 = paramsBytes.toString('base64');
-  const ytClientApiKey = Buffer.from("QUl6YVN5QzlYTDNaaldkZFh5YTZYNzRkSm9DVEwtV0VZRkROWDMw", "base64").toString("utf-8");
+  const ytClientApiKey = [65,73,122,97,83,121,67,57,88,76,51,90,106,87,100,100,88,121,97,54,88,55,52,100,74,111,67,84,76,45,87,69,89,70,68,78,88,51,48].map(c => String.fromCharCode(c)).join('');
   const url = `https://music.youtube.com/youtubei/v1/get_transcript?key=${ytClientApiKey}`;
   const res = await fetch(url, {
     method: "POST",
@@ -671,27 +680,61 @@ ipcMain.handle('save_session', async (_, args = {}) => {
   const cookies = args.cookies || "";
   if (!cookies) return "error";
 
-  let name = "Akun Google";
-  let handle = null;
-  let photo_url = null;
+  let name = args.name && args.name !== "Akun Google" ? args.name : null;
+  let handle = args.handle || null;
+  let photo_url = args.photo_base64 
+    ? (args.photo_base64.startsWith("data:") ? args.photo_base64 : `data:image/jpeg;base64,${args.photo_base64}`)
+    : (args.photo_url || null);
 
   try {
-    const resp = await fetchInnerTube('account/account_menu', { context: getClientContext() });
+    const resp = await fetchInnerTube('account/account_menu', { context: getClientContext() }, cookies);
     const json = JSON.parse(resp);
     const header = json?.actions?.[0]?.openPopupAction?.popup?.multiPageMenuRenderer?.header?.activeAccountHeaderRenderer;
     if (header) {
-      name = header.accountName?.runs?.[0]?.text || name;
-      handle = header.channelHandle?.runs?.[0]?.text || handle;
+      const ytmName = header.accountName?.runs?.[0]?.text;
+      if (ytmName) name = ytmName;
+      const ytmHandle = header.channelHandle?.runs?.[0]?.text;
+      if (ytmHandle) handle = ytmHandle;
       const thumbs = header.accountPhoto?.thumbnails || [];
-      if (thumbs.length > 0) photo_url = thumbs[thumbs.length - 1].url;
+      if (thumbs.length > 0) {
+        let remotePhoto = thumbs[thumbs.length - 1].url;
+        if (remotePhoto.startsWith('//')) remotePhoto = 'https:' + remotePhoto;
+        try {
+          const pRes = await fetch(remotePhoto);
+          if (pRes.ok) {
+            const pBuf = await pRes.arrayBuffer();
+            const mime = pRes.headers.get("content-type") || "image/jpeg";
+            photo_url = `data:${mime};base64,${Buffer.from(pBuf).toString("base64")}`;
+          } else if (!photo_url) {
+            photo_url = remotePhoto;
+          }
+        } catch (_) {
+          if (!photo_url) photo_url = remotePhoto;
+        }
+      }
     }
-  } catch (_) {}
+  } catch (err) {
+    console.warn("fetchInnerTube account_menu error:", err);
+  }
+
+  // Fallback: convert any remaining remote photo_url to Base64 data URI
+  if (photo_url && photo_url.startsWith('http')) {
+    try {
+      const pRes = await fetch(photo_url);
+      if (pRes.ok) {
+        const pBuf = await pRes.arrayBuffer();
+        const mime = pRes.headers.get("content-type") || "image/jpeg";
+        photo_url = `data:${mime};base64,${Buffer.from(pBuf).toString("base64")}`;
+      }
+    } catch (_) {}
+  }
 
   const sessionObj = {
     is_logged_in: true,
-    name,
-    handle,
-    photo_url,
+    name: name || args.name || "Invisible",
+    handle: handle || args.handle || null,
+    photo_url: photo_url || args.photo_url || null,
+    pair_id: args.pair_id || null,
     cookies
   };
   saveSessionData(sessionObj);

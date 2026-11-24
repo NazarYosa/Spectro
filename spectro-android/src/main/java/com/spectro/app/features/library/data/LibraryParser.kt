@@ -32,11 +32,11 @@ object LibraryParser {
             ?: next?.objectAt("musicShelfContinuation")
             ?: next?.objectAt("gridContinuation")
             ?: response.findObjects("musicPlaylistShelfRenderer").firstOrNull { (it.arrayAt("contents")?.length() ?: 0) > 0 }
-            ?: (response.findObjects("musicShelfRenderer") + response.findObjects("gridRenderer"))
+            ?: (response.findObjects("gridRenderer") + response.findObjects("musicShelfRenderer"))
                 .firstOrNull { (it.arrayAt("contents")?.length() ?: 0) > 0 || (it.arrayAt("items")?.length() ?: 0) > 0 }
             ?: response.findObjects("musicPlaylistShelfRenderer").firstOrNull()
-            ?: response.findObjects("musicShelfRenderer").firstOrNull()
             ?: response.findObjects("gridRenderer").firstOrNull()
+            ?: response.findObjects("musicShelfRenderer").firstOrNull()
 
         val rawEntries = (container?.arrayAt("contents").objects() + container?.arrayAt("items").objects())
             .ifEmpty {
@@ -59,7 +59,13 @@ object LibraryParser {
             ?: rawEntries.lastOrNull()?.stringAt("continuationItemRenderer", "continuationEndpoint", "continuationCommand", "continuation")
             ?: response.findObjects("nextContinuationData").firstOrNull()?.stringAt("continuation")
 
-        return LibraryPage(items = rawEntries.mapNotNull(::itemOf), continuation = continuation, sortOptions = sortOptionsOf(response))
+        val parsedItems = rawEntries.mapNotNull(::itemOf).ifEmpty {
+            response.findObjects("musicTwoRowItemRenderer")
+                .map { JSONObject().put("musicTwoRowItemRenderer", it) }
+                .mapNotNull(::itemOf)
+        }
+
+        return LibraryPage(items = parsedItems, continuation = continuation, sortOptions = sortOptionsOf(response))
     }
 
     // The orders of the button above the list, only when more than one of them can be asked
@@ -104,7 +110,7 @@ object LibraryParser {
         }
 
         // A row that is a playlist
-        if (pageType == PagePlaylist || (browseId != null && (browseId.startsWith("VLPL") || browseId.startsWith("PL") || browseId.startsWith("RDCLAK")))) {
+        if (pageType == PagePlaylist || (browseId != null && (browseId.startsWith("VL") || browseId.startsWith("PL") || browseId.startsWith("RDCLAK")))) {
             return HomeItem(
                 kind = HomeItemKind.Playlist,
                 id = (browseId ?: return null).removePrefix(PlaylistPagePrefix),

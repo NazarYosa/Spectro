@@ -66,6 +66,7 @@
       settings_sync_none: "Belum ada HP yang terhubung.",
       settings_btn_pair: "Hubungkan HP",
       settings_btn_reconnect: "Hubungkan Ulang",
+      settings_btn_disconnect: "Putuskan Koneksi",
       settings_group_lyrics: "Sumber Lirik",
       settings_lyrics_desc: "Atur urutan dan aktifkan penyedia lirik sesuai pilihan Anda.",
       settings_lyrics_active: "Aktif digunakan",
@@ -94,7 +95,7 @@
       settings_btn_clear: "Bersihkan",
       settings_group_about: "Tentang Aplikasi",
       settings_about_app: "Spectro Music Player for Windows",
-      settings_about_version: "Versi 1.0.0 (Official Release)",
+      settings_about_version: "Versi 1.0.1 (Official Release)",
       settings_about_license: "Lisensi Bebas GPL-3.0",
       eq_title: "Pengatur Nada (Equalizer)",
       eq_preset: "Pilihan Suara",
@@ -136,6 +137,7 @@
       settings_sync_none: "No smartphone paired yet.",
       settings_btn_pair: "Pair Phone",
       settings_btn_reconnect: "Reconnect",
+      settings_btn_disconnect: "Disconnect",
       settings_group_lyrics: "Lyrics Providers",
       settings_lyrics_desc: "Reorder and toggle your preferred lyrics sources.",
       settings_lyrics_active: "Active",
@@ -164,7 +166,7 @@
       settings_btn_clear: "Clear Now",
       settings_group_about: "About Spectro",
       settings_about_app: "Spectro Music Player for Windows",
-      settings_about_version: "Version 1.0.0 (Official Release)",
+      settings_about_version: "Version 1.0.1 (Official Release)",
       settings_about_license: "Free & Open Source GPL-3.0",
       eq_title: "Equalizer & Tone",
       eq_preset: "Sound Preset",
@@ -1127,32 +1129,35 @@
       selectTrackLyrics.disabled = true;
     }
 
-    const track = state.queue[index];
-    saveRecentlyPlayed(track);
-    const safeArt = track.art || (track.videoId ? `https://i.ytimg.com/vi/${track.videoId}/hqdefault.jpg` : "logo.png");
+    const ytVid = track.videoId || track.id;
+    const safeArt = track.art || (ytVid ? `https://i.ytimg.com/vi/${ytVid}/hqdefault.jpg` : "logo.png");
+
+    function attachImgFallback(imgEl, vid) {
+      if (!imgEl) return;
+      imgEl.referrerPolicy = "no-referrer";
+      imgEl.onerror = () => {
+        imgEl.onerror = null;
+        if (vid) imgEl.src = `https://i.ytimg.com/vi/${vid}/hqdefault.jpg`;
+        else imgEl.src = "logo.png";
+      };
+      imgEl.src = safeArt;
+    }
 
     // Update Bottom Mini Player Bar
     playerTitle.textContent = cleanDisplayTitle(track.title);
     playerArtist.textContent = track.artist;
-    playerArt.src = safeArt;
-    playerArt.onerror = () => { playerArt.src = "logo.png"; };
+    attachImgFallback(playerArt, ytVid);
 
     // Update Dedicated Music Player View in Main Canvas
     if (pvTitle) pvTitle.textContent = cleanDisplayTitle(track.title);
     if (pvArtist) pvArtist.textContent = track.artist;
     if (pvAlbum) pvAlbum.textContent = track.album || "Spectro Pure Audio";
-    if (pvArtwork) {
-      pvArtwork.src = safeArt;
-      pvArtwork.onerror = () => { pvArtwork.src = "logo.png"; };
-    }
+    attachImgFallback(pvArtwork, ytVid);
 
     // Update Dedicated Queue Panel
     if (queueActiveTitle) queueActiveTitle.textContent = cleanDisplayTitle(track.title);
     if (queueActiveArtist) queueActiveArtist.textContent = track.artist;
-    if (queueActiveArt) {
-      queueActiveArt.src = safeArt;
-      queueActiveArt.onerror = () => { queueActiveArt.src = "logo.png"; };
-    }
+    attachImgFallback(queueActiveArt, ytVid);
 
     timeCurrent.textContent = "0:00";
     timeTotal.textContent = formatTime(track.duration || 0);
@@ -1331,6 +1336,16 @@
       if (queueActiveArtist) queueActiveArtist.textContent = currentTrack.artist;
       if (queueActiveArt) {
         queueActiveArt.src = currentTrack.art || (currentTrack.videoId ? `https://i.ytimg.com/vi/${currentTrack.videoId}/hqdefault.jpg` : "logo.png");
+        queueActiveArt.setAttribute("referrerpolicy", "no-referrer");
+        queueActiveArt.onerror = function() {
+          if (!this.dataset.fb && (currentTrack.videoId || currentTrack.id)) {
+            this.dataset.fb = '1';
+            this.src = `https://i.ytimg.com/vi/${currentTrack.videoId || currentTrack.id}/hqdefault.jpg`;
+          } else {
+            this.onerror = null;
+            this.src = 'logo.png';
+          }
+        };
       }
       const waveAnim = document.getElementById("queue-wave-anim");
       if (waveAnim && state.isPlaying) waveAnim.classList.remove("hidden");
@@ -1352,7 +1367,12 @@
       return `
         <div class="queue-item" data-queue-idx="${actualIdx}">
           <span class="queue-idx">${i + 1}</span>
-          <img src="${art}" onerror="this.src='logo.png'" alt="${track.title}" class="queue-thumb">
+          <img src="${art}" 
+               referrerpolicy="no-referrer" 
+               loading="lazy" 
+               onerror="if(!this.dataset.fb && '${track.videoId || track.id || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${track.videoId || track.id}/hqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}" 
+               alt="${escapeHtml(track.title)}" 
+               class="queue-thumb">
           <div class="queue-text">
             <span class="q-title">${cleanDisplayTitle(track.title)}</span>
             <span class="q-artist">${track.artist}</span>
@@ -1833,7 +1853,51 @@
   }
 
   // --- 8. InnerTube Parsing Utilities ---
-  function extractInnerTubeTracks(response) {
+  function parseCol1Runs(runs) {
+    if (!Array.isArray(runs) || runs.length === 0) return { artist: "Artis YouTube", album: "Single" };
+    const segments = [];
+    let currentSeg = "";
+    for (const r of runs) {
+      if (r.text === " • " || r.text === "•") {
+        if (currentSeg.trim()) segments.push(currentSeg.trim());
+        currentSeg = "";
+      } else {
+        currentSeg += r.text || "";
+      }
+    }
+    if (currentSeg.trim()) segments.push(currentSeg.trim());
+    const badges = new Set(["Lagu", "Song", "Video", "Single", "Album", "EP", "Artis", "Artist"]);
+    const filtered = segments.filter(s => !badges.has(s));
+    const artist = filtered[0] || segments[0] || "Artis YouTube";
+    const album = filtered[1] || segments[1] || "Single";
+    return { artist, album };
+  }
+
+  function extractTrackThumb(container, vid) {
+    const fallback = vid ? `https://i.ytimg.com/vi/${vid}/hqdefault.jpg` : "logo.png";
+    if (!container) return fallback;
+    const thumbObj = container.thumbnail || container.thumbnailRenderer;
+    if (!thumbObj) return fallback;
+    const candidateLists = [
+      thumbObj.musicThumbnailRenderer?.thumbnail?.thumbnails,
+      thumbObj.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails,
+      thumbObj.musicAnimatedThumbnailRenderer?.backupRenderer?.thumbnail?.thumbnails,
+      thumbObj.musicResponsiveListItemThumbnailRenderer?.thumbnail?.thumbnails,
+      thumbObj.thumbnail?.thumbnails,
+      thumbObj.thumbnails
+    ];
+    for (const list of candidateLists) {
+      if (Array.isArray(list) && list.length > 0) {
+        const best = list[list.length - 1]?.url || list[0]?.url;
+        if (best && typeof best === 'string') {
+          return best.startsWith('//') ? 'https:' + best : best;
+        }
+      }
+    }
+    return fallback;
+  }
+
+  function extractInnerTubeSearchResults(response, categoryId = "all") {
     const results = [];
     const seenIds = new Set();
     const badges = new Set(["Lagu", "Song", "Video", "Single", "Album", "EP", "Artis", "Artist"]);
@@ -1841,8 +1905,8 @@
     function walk(obj) {
       if (!obj || typeof obj !== "object") return;
 
-      // 1. Top result card (musicCardShelfRenderer)
-      if (obj.musicCardShelfRenderer) {
+      // 1. Top result card (musicCardShelfRenderer) - only for 'all'
+      if (categoryId === "all" && obj.musicCardShelfRenderer) {
         const card = obj.musicCardShelfRenderer;
         const videoId = card.title?.runs?.[0]?.navigationEndpoint?.watchEndpoint?.videoId ||
                         card.onTap?.watchEndpoint?.videoId ||
@@ -1851,63 +1915,109 @@
           seenIds.add(videoId);
           const title = card.title?.runs?.[0]?.text || "Top Result";
           const subtitleRuns = card.subtitle?.runs || [];
-          const texts = subtitleRuns.map(r => r.text).filter(t => t !== " • " && t.trim().length > 0);
-          const filtered = texts.filter(t => !badges.has(t));
-          const artist = filtered[0] || "Artis YouTube";
-          const album = filtered[1] || "Single";
-          let art = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-          const thumbs = card.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails;
-          if (thumbs && thumbs.length > 0) art = thumbs[thumbs.length - 1].url;
-          results.push({ id: videoId, videoId, title, artist, album, duration: 0, art });
+          const parsed = parseCol1Runs(subtitleRuns);
+          const art = extractTrackThumb(card, videoId);
+          results.push({ type: "track", id: videoId, videoId, title, artist: parsed.artist, album: parsed.album, duration: 0, art, isTopResult: true });
         }
       }
 
-      // 2. List items (musicResponsiveListItemRenderer)
+      // 2. Responsive List items (musicResponsiveListItemRenderer)
       if (obj.musicResponsiveListItemRenderer) {
         const item = obj.musicResponsiveListItemRenderer;
-        const videoId = item.playlistItemData?.videoId || 
-                        item.navigationEndpoint?.watchEndpoint?.videoId ||
-                        item.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
+        const flexCols = item.flexColumns || [];
+        const title = flexCols[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || "Item";
 
-        if (videoId && !seenIds.has(videoId)) {
-          seenIds.add(videoId);
-          const flexCols = item.flexColumns || [];
-          const title = flexCols[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || "Lagu";
-          
-          let artist = "Artis YouTube";
-          let album = "Single";
-          if (flexCols.length > 1) {
+        if (categoryId === "artists") {
+          const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
+          if (browseId && !seenIds.has(browseId)) {
+            seenIds.add(browseId);
             const runs = flexCols[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
-            const texts = runs.map(r => r.text).filter(t => t !== " • " && t.trim().length > 0);
-            const filtered = texts.filter(t => !badges.has(t));
-            if (filtered.length > 0) artist = filtered[0];
-            if (filtered.length > 1) album = filtered[1];
+            const subtitle = runs.map(r => r.text).join('').trim() || "Artis";
+            const art = extractTrackThumb(item, null);
+            results.push({ type: "artist", browseId, title, subtitle, art });
           }
+        } else if (categoryId === "albums") {
+          const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
+          if (browseId && !seenIds.has(browseId)) {
+            seenIds.add(browseId);
+            const runs = flexCols[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+            const subtitle = runs.map(r => r.text).join('').trim() || "Album";
+            const art = extractTrackThumb(item, null);
+            results.push({ type: "album", browseId, title, subtitle, art });
+          }
+        } else if (categoryId === "playlists") {
+          const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
+          if (browseId && !seenIds.has(browseId)) {
+            seenIds.add(browseId);
+            const runs = flexCols[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+            const subtitle = runs.map(r => r.text).join('').trim() || "Playlist";
+            const art = extractTrackThumb(item, null);
+            results.push({ type: "playlist", browseId, title, subtitle, art });
+          }
+        } else {
+          // all, songs, videos
+          const videoId = item.playlistItemData?.videoId || 
+                          item.navigationEndpoint?.watchEndpoint?.videoId ||
+                          item.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
 
-          let art = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-          const thumbs = item.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails;
-          if (thumbs && thumbs.length > 0) art = thumbs[thumbs.length - 1].url;
+          if (videoId && !seenIds.has(videoId)) {
+            seenIds.add(videoId);
+            let artist = "Artis YouTube";
+            let album = "Single";
+            if (flexCols.length > 1) {
+              const runs = flexCols[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+              const parsedMeta = parseCol1Runs(runs);
+              artist = parsedMeta.artist;
+              album = parsedMeta.album;
+            }
 
-          results.push({ id: videoId, videoId, title, artist, album, duration: 0, art });
+            const art = extractTrackThumb(item, videoId);
+            results.push({ type: "track", id: videoId, videoId, title, artist, album, duration: 0, art });
+          }
         }
       }
 
       // 3. Two row items (musicTwoRowItemRenderer)
       if (obj.musicTwoRowItemRenderer) {
         const item = obj.musicTwoRowItemRenderer;
-        const videoId = item.navigationEndpoint?.watchEndpoint?.videoId ||
-                        item.thumbnailOverlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
+        if (categoryId === "artists") {
+          const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
+          if (browseId && !seenIds.has(browseId)) {
+            seenIds.add(browseId);
+            const title = item.title?.runs?.[0]?.text || "Artis";
+            const subtitle = item.subtitle?.runs?.map(r => r.text).join('') || "Artis";
+            const art = extractTrackThumb(item, null);
+            results.push({ type: "artist", browseId, title, subtitle, art });
+          }
+        } else if (categoryId === "albums") {
+          const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
+          if (browseId && !seenIds.has(browseId)) {
+            seenIds.add(browseId);
+            const title = item.title?.runs?.[0]?.text || "Album";
+            const subtitle = item.subtitle?.runs?.map(r => r.text).join('') || "Album";
+            const art = extractTrackThumb(item, null);
+            results.push({ type: "album", browseId, title, subtitle, art });
+          }
+        } else if (categoryId === "playlists") {
+          const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
+          if (browseId && !seenIds.has(browseId)) {
+            seenIds.add(browseId);
+            const title = item.title?.runs?.[0]?.text || "Playlist";
+            const subtitle = item.subtitle?.runs?.map(r => r.text).join('') || "Playlist";
+            const art = extractTrackThumb(item, null);
+            results.push({ type: "playlist", browseId, title, subtitle, art });
+          }
+        } else {
+          const videoId = item.navigationEndpoint?.watchEndpoint?.videoId ||
+                          item.thumbnailOverlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer?.playNavigationEndpoint?.watchEndpoint?.videoId;
 
-        if (videoId && !seenIds.has(videoId)) {
-          seenIds.add(videoId);
-          const title = item.title?.runs?.[0]?.text || "Lagu";
-          let artist = item.subtitle?.runs?.[0]?.text || "Artis YouTube";
-          let album = item.subtitle?.runs?.[2]?.text || "Single";
-          let art = `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-          const thumbs = item.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails;
-          if (thumbs && thumbs.length > 0) art = thumbs[thumbs.length - 1].url;
-
-          results.push({ id: videoId, videoId, title, artist, album, duration: 0, art });
+          if (videoId && !seenIds.has(videoId)) {
+            seenIds.add(videoId);
+            const title = item.title?.runs?.[0]?.text || "Lagu";
+            const parsedMeta = parseCol1Runs(item.subtitle?.runs || []);
+            const art = extractTrackThumb(item, videoId);
+            results.push({ type: "track", id: videoId, videoId, title, artist: parsedMeta.artist, album: parsedMeta.album, duration: 0, art });
+          }
         }
       }
 
@@ -1918,6 +2028,11 @@
 
     walk(response);
     return results;
+  }
+
+  function extractInnerTubeTracks(response) {
+    const allItems = extractInnerTubeSearchResults(response, "all");
+    return allItems.filter(item => item.type === "track");
   }
 
   // --- 9. Beranda / Home Page (Real Live YouTube Music Browse) ---
@@ -1943,7 +2058,11 @@
         ${recentlyPlayed.slice(0, 6).map(t => `
           <div class="music-card recent-track-card" data-video-id="${t.videoId || t.id}" title="${escapeHtml(t.title)} - ${escapeHtml(t.artist)}">
             <div class="card-img-wrapper">
-              <img src="${t.art || 'logo.png'}" alt="${escapeHtml(t.title)}" onerror="this.src='logo.png'">
+              <img src="${t.art || (t.videoId ? `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg` : 'logo.png')}" 
+                   referrerpolicy="no-referrer" 
+                   loading="lazy" 
+                   alt="${escapeHtml(t.title)}" 
+                   onerror="if(!this.dataset.fb && '${t.videoId || t.id || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${t.videoId || t.id}/hqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}">
               <div class="card-play-overlay">
                 <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
               </div>
@@ -2064,7 +2183,11 @@
         const art = t.art || (t.videoId ? `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg` : "logo.png");
         return `
           <div class="quick-card home-fallback-card" data-video-id="${t.videoId || t.id}">
-            <img src="${art}" alt="${escapeHtml(t.title)}" onerror="this.src='logo.png'">
+            <img src="${art}" 
+                 referrerpolicy="no-referrer" 
+                 loading="lazy" 
+                 alt="${escapeHtml(t.title)}" 
+                 onerror="if(!this.dataset.fb && '${t.videoId || t.id || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${t.videoId || t.id}/hqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}">
             <span>${escapeHtml(cleanDisplayTitle(t.title))}</span>
           </div>
         `;
@@ -2086,7 +2209,11 @@
             return `
               <div class="music-card home-fallback-card" data-video-id="${t.videoId || t.id}" title="${escapeHtml(t.title)} - ${escapeHtml(t.artist)}">
                 <div class="card-img-wrapper">
-                  <img src="${art}" alt="${escapeHtml(t.title)}" onerror="this.src='logo.png'">
+                  <img src="${art}" 
+                       referrerpolicy="no-referrer" 
+                       loading="lazy" 
+                       alt="${escapeHtml(t.title)}" 
+                       onerror="if(!this.dataset.fb && '${t.videoId || t.id || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${t.videoId || t.id}/hqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}">
                   <div class="card-play-overlay">
                     <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                   </div>
@@ -2196,13 +2323,17 @@
             ${sectionTracks.slice(0, 10).map(t => `
               <div class="music-card" data-live-id="${t.videoId}">
                 <div class="card-img-wrapper">
-                  <img src="${t.art}" onerror="this.src='logo.png'" alt="${t.title}">
+                  <img src="${t.art || (t.videoId ? `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg` : 'logo.png')}" 
+                       referrerpolicy="no-referrer" 
+                       loading="lazy" 
+                       onerror="if(!this.dataset.fb && '${t.videoId || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}" 
+                       alt="${escapeHtml(t.title)}">
                   <button class="card-play-btn" title="Putar">
                     <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                   </button>
                 </div>
                 <div class="card-title">${cleanDisplayTitle(t.title)}</div>
-                <div class="card-subtitle">${t.artist}</div>
+                <div class="card-subtitle">${escapeHtml(t.artist)}</div>
               </div>
             `).join('')}
           </div>
@@ -2217,13 +2348,17 @@
             ${sectionPlaylists.slice(0, 10).map(p => `
               <div class="music-card" data-live-browse-id="${p.browseId}">
                 <div class="card-img-wrapper">
-                  <img src="${p.art}" onerror="this.src='logo.png'" alt="${p.title}">
+                  <img src="${p.art || 'logo.png'}" 
+                       referrerpolicy="no-referrer" 
+                       loading="lazy" 
+                       onerror="this.onerror=null;this.src='logo.png';" 
+                       alt="${escapeHtml(p.title)}">
                   <button class="card-play-btn" title="Buka Playlist">
                     <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
                   </button>
                 </div>
                 <div class="card-title">${cleanDisplayTitle(p.title)}</div>
-                <div class="card-subtitle">${p.subtitle}</div>
+                <div class="card-subtitle">${escapeHtml(p.subtitle)}</div>
               </div>
             `).join('')}
           </div>
@@ -2259,7 +2394,12 @@
       const top6 = allTracksCollected.slice(0, 6);
       quickPicksContainer.innerHTML = top6.map(t => `
         <div class="quick-card" data-live-id="${t.videoId}">
-          <img src="${t.art}" onerror="this.src='logo.png'" alt="${t.title}" class="quick-card-art">
+          <img src="${t.art || (t.videoId ? `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg` : 'logo.png')}" 
+               referrerpolicy="no-referrer" 
+               loading="lazy" 
+               onerror="if(!this.dataset.fb && '${t.videoId || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}" 
+               alt="${escapeHtml(t.title)}" 
+               class="quick-card-art">
           <span class="quick-card-title">${cleanDisplayTitle(t.title)}</span>
           <button class="card-play-btn" title="Putar">
             <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
@@ -2308,28 +2448,69 @@
   }
 
   // --- 10. Search Execution & Results Rendering ---
+  const SEARCH_CATEGORIES = [
+    { id: "all", name: "Semua", params: null },
+    { id: "songs", name: "Lagu", params: "EgWKAQIIAWoKEAkQBRAKEAMQBA==" },
+    { id: "videos", name: "Video", params: "EgWKAQIQAWoKEAkQChAFEAMQBA==" },
+    { id: "artists", name: "Artis", params: "EgWKAQIgAWoKEAkQChAFEAMQBA==" },
+    { id: "albums", name: "Album", params: "EgWKAQIYAWoKEAkQChAFEAMQBA==" },
+    { id: "playlists", name: "Playlist", params: "EgeKAQQoAEABagoQAxAEEAoQCRAF" }
+  ];
+
+  let currentSearchCategory = "all";
+  let currentSearchQuery = "";
   let activeSearchRequestId = 0;
 
-  async function performSearch(query) {
+  function renderSearchCategoryBar(activeCategoryId) {
+    return `
+      <div class="search-category-bar">
+        ${SEARCH_CATEGORIES.map(cat => `
+          <button class="search-cat-chip ${cat.id === activeCategoryId ? 'active' : ''}" data-cat-id="${cat.id}">
+            ${cat.name}
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  function bindSearchCategoryChips() {
+    pageContent.querySelectorAll(".search-cat-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        const catId = chip.getAttribute("data-cat-id");
+        if (catId && currentSearchQuery) {
+          performSearch(currentSearchQuery, catId);
+        }
+      });
+    });
+  }
+
+  async function performSearch(query, categoryId = "all") {
     if (!query || !query.trim()) return;
     query = query.trim();
+    currentSearchQuery = query;
+    currentSearchCategory = categoryId;
     hidePlayerView();
     state.activePage = "search";
     const thisRequestId = ++activeSearchRequestId;
 
+    const catObj = SEARCH_CATEGORIES.find(c => c.id === categoryId) || SEARCH_CATEGORIES[0];
+
     pageContent.innerHTML = `
-      <div style="padding: 24px;">
-        <h2 class="section-title mb-3">Mencari: "${query}"...</h2>
-        <div style="display: flex; align-items: center; gap: 12px; color: var(--text-secondary); margin-top: 16px;">
+      <div style="padding: 24px 0 32px 0;">
+        <h2 class="section-title mb-3">Mencari: "${escapeHtml(query)}"</h2>
+        ${renderSearchCategoryBar(categoryId)}
+        <div style="display: flex; align-items: center; gap: 12px; color: var(--text-secondary); margin-top: 24px; padding: 20px 0;">
           <svg style="width: 24px; height: 24px; animation: spin 1s linear infinite;" viewBox="0 0 24 24"><path fill="currentColor" d="M12 4V2A10 10 0 0 0 2 12h2a8 8 0 0 1 8-8z"/></svg>
-          <span>Mengambil katalog resmi YouTube Music...</span>
+          <span>Mengambil katalog resmi YouTube Music (${catObj.name})...</span>
         </div>
       </div>
       <style>@keyframes spin { 100% { transform: rotate(360deg); } }</style>
     `;
 
+    bindSearchCategoryChips();
+
     try {
-      const searchPromise = invokeTauri("search_music", { query });
+      const searchPromise = invokeTauri("search_music", { query, params: catObj.params });
       const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout")), 8000));
       const rawJson = await Promise.race([searchPromise, timeoutPromise]);
 
@@ -2337,9 +2518,9 @@
 
       if (rawJson) {
         const parsed = JSON.parse(rawJson);
-        const songs = extractInnerTubeTracks(parsed);
-        state.searchResults = songs;
-        renderSearchResults(query, songs);
+        const results = extractInnerTubeSearchResults(parsed, categoryId);
+        state.searchResults = results.filter(r => r.type === "track");
+        renderSearchResults(query, results, categoryId);
         return;
       }
     } catch (e) {
@@ -2347,98 +2528,234 @@
     }
 
     if (thisRequestId === activeSearchRequestId) {
-      renderSearchResults(query, []);
+      renderSearchResults(query, [], categoryId);
     }
   }
 
-  function renderSearchResults(query, tracks) {
-    if (!tracks || tracks.length === 0) {
+  function renderSearchResults(query, results, categoryId = "all") {
+    const catObj = SEARCH_CATEGORIES.find(c => c.id === categoryId) || SEARCH_CATEGORIES[0];
+    const categoryBarHtml = renderSearchCategoryBar(categoryId);
+
+    if (!results || results.length === 0) {
       pageContent.innerHTML = `
-        <div style="padding: 24px;">
-          <h2 class="section-title mb-3">Hasil Pencarian: "${query}"</h2>
-          <p style="color: var(--text-secondary); margin-top: 12px;">Tidak ada musik yang ditemukan untuk "${query}". Coba kata kunci lain.</p>
+        <div style="padding: 24px 0 32px 0;">
+          <h2 class="section-title mb-3">Hasil Pencarian: "${escapeHtml(query)}"</h2>
+          ${categoryBarHtml}
+          <div style="padding: 40px 16px; text-align: center; color: var(--text-muted);">
+            <p style="font-size: 1.05rem; color: var(--text-secondary); margin-bottom: 8px;">Tidak ada hasil untuk kategori <strong>${catObj.name}</strong>.</p>
+            <p style="font-size: 0.85rem;">Coba pilih kategori lain di atas atau gunakan kata kunci yang berbeda.</p>
+          </div>
         </div>
       `;
+      bindSearchCategoryChips();
       return;
     }
 
-    const topResult = tracks[0];
+    let contentHtml = "";
 
-    pageContent.innerHTML = `
-      <div style="padding-bottom: 32px;">
-        <h2 class="section-title mb-3">Hasil Pencarian: "${query}"</h2>
-        
-        <!-- Top Result Card -->
-        <div style="margin-bottom: 24px; background: rgba(255,255,255,0.05); padding: 20px; border-radius: 8px; display: flex; align-items: center; gap: 20px; cursor: pointer;" id="top-result-card">
-          <img src="${topResult.art}" onerror="this.src='logo.png'" alt="${topResult.title}" style="width: 80px; height: 80px; border-radius: 6px; object-fit: cover;">
-          <div style="flex: 1; overflow: hidden;">
-            <div style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: #1db954; margin-bottom: 4px;">Hasil Teratas</div>
-            <div style="font-size: 1.4rem; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${cleanDisplayTitle(topResult.title)}</div>
-            <div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${topResult.artist} • ${topResult.album}</div>
-          </div>
-          <button class="playlist-play-all-btn" title="Putar Sekarang" style="width: 44px; height: 44px; flex-shrink: 0;">
-            <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-          </button>
+    if (categoryId === "artists") {
+      contentHtml = `
+        <div class="search-results-grid">
+          ${results.map((item, i) => `
+            <div class="search-card" data-artist-idx="${i}" title="${escapeHtml(item.title)}">
+              <div class="search-card-img-wrapper circle">
+                <img src="${item.art || 'logo.png'}" 
+                     referrerpolicy="no-referrer" 
+                     loading="lazy" 
+                     onerror="this.onerror=null;this.src='logo.png';" 
+                     alt="${escapeHtml(item.title)}" 
+                     class="search-card-img">
+              </div>
+              <div class="search-card-title center">${cleanDisplayTitle(item.title)}</div>
+              <div class="search-card-subtitle center">${escapeHtml(item.subtitle || 'Artis')}</div>
+            </div>
+          `).join('')}
         </div>
+      `;
+    } else if (categoryId === "albums") {
+      contentHtml = `
+        <div class="search-results-grid">
+          ${results.map((item, i) => `
+            <div class="search-card" data-album-idx="${i}" title="${escapeHtml(item.title)}">
+              <div class="search-card-img-wrapper">
+                <img src="${item.art || 'logo.png'}" 
+                     referrerpolicy="no-referrer" 
+                     loading="lazy" 
+                     onerror="this.onerror=null;this.src='logo.png';" 
+                     alt="${escapeHtml(item.title)}" 
+                     class="search-card-img">
+                <button class="search-card-play-btn" title="Buka Album">
+                  <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+              </div>
+              <div class="search-card-title">${cleanDisplayTitle(item.title)}</div>
+              <div class="search-card-subtitle">${escapeHtml(item.subtitle || 'Album')}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } else if (categoryId === "playlists") {
+      contentHtml = `
+        <div class="search-results-grid">
+          ${results.map((item, i) => `
+            <div class="search-card" data-playlist-idx="${i}" title="${escapeHtml(item.title)}">
+              <div class="search-card-img-wrapper">
+                <img src="${item.art || 'logo.png'}" 
+                     referrerpolicy="no-referrer" 
+                     loading="lazy" 
+                     onerror="this.onerror=null;this.src='logo.png';" 
+                     alt="${escapeHtml(item.title)}" 
+                     class="search-card-img">
+                <button class="search-card-play-btn" title="Buka Playlist">
+                  <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+              </div>
+              <div class="search-card-title">${cleanDisplayTitle(item.title)}</div>
+              <div class="search-card-subtitle">${escapeHtml(item.subtitle || 'Playlist')}</div>
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } else {
+      // all, songs, videos
+      const tracks = results.filter(r => r.type === "track");
+      const topResult = results[0];
 
-        <h3 class="section-title" style="font-size: 1.1rem; margin-bottom: 12px;">Lagu Terkait</h3>
+      let topCardHtml = "";
+      if (categoryId === "all" && topResult) {
+        const topArt = topResult.art || (topResult.videoId ? `https://i.ytimg.com/vi/${topResult.videoId}/hqdefault.jpg` : 'logo.png');
+        topCardHtml = `
+          <div style="margin-bottom: 24px; background: rgba(255,255,255,0.05); padding: 20px; border-radius: 8px; display: flex; align-items: center; gap: 20px; cursor: pointer;" id="top-result-card">
+            <img src="${topArt}" 
+                 referrerpolicy="no-referrer" 
+                 loading="lazy" 
+                 onerror="if(!this.dataset.fb && '${topResult.videoId || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${topResult.videoId}/hqdefault.jpg';}else if(this.dataset.fb==='1' && '${topResult.videoId || ''}'){this.dataset.fb='2';this.src='https://i.ytimg.com/vi/${topResult.videoId}/mqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}" 
+                 alt="${escapeHtml(topResult.title)}" 
+                 style="width: 80px; height: 80px; border-radius: 6px; object-fit: cover;">
+            <div style="flex: 1; overflow: hidden;">
+              <div style="font-size: 0.8rem; font-weight: 700; text-transform: uppercase; color: var(--accent-cyan); margin-bottom: 4px;">Hasil Teratas</div>
+              <div style="font-size: 1.4rem; font-weight: 800; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${cleanDisplayTitle(topResult.title)}</div>
+              <div style="font-size: 0.9rem; color: var(--text-secondary); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(topResult.artist || 'Artis YouTube')} • ${escapeHtml(topResult.album || 'Single')}</div>
+            </div>
+            <button class="playlist-play-all-btn" title="Putar Sekarang" style="width: 44px; height: 44px; flex-shrink: 0;">
+              <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+          </div>
+        `;
+      }
+
+      contentHtml = `
+        ${topCardHtml}
+        <h3 class="section-title" style="font-size: 1.1rem; margin-bottom: 12px;">${categoryId === "videos" ? "Video Terkait" : "Lagu Terkait"}</h3>
         <table class="track-table">
           <thead>
             <tr>
               <th class="track-num">#</th>
               <th>Judul</th>
-              <th>Album</th>
+              <th>${categoryId === "videos" ? "Artis & Info" : "Album"}</th>
               <th style="text-align: right;">Aksi</th>
             </tr>
           </thead>
           <tbody>
-            ${tracks.map((t, i) => `
-              <tr class="track-row" data-search-idx="${i}">
-                <td class="track-num">${i + 1}</td>
-                <td>
-                  <div class="track-title-cell">
-                    <img src="${t.art}" onerror="this.src='logo.png'" alt="${t.title}" class="track-thumb">
-                    <div class="track-cell-info">
-                      <span class="track-cell-title">${cleanDisplayTitle(t.title)}</span>
-                      <span class="track-cell-artist">${t.artist}</span>
+            ${tracks.map((t, i) => {
+              const art = t.art || (t.videoId ? `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg` : 'logo.png');
+              return `
+                <tr class="track-row" data-search-idx="${i}">
+                  <td class="track-num">${i + 1}</td>
+                  <td>
+                    <div class="track-title-cell">
+                      <img src="${art}" 
+                           referrerpolicy="no-referrer" 
+                           loading="lazy" 
+                           onerror="if(!this.dataset.fb && '${t.videoId || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg';}else if(this.dataset.fb==='1' && '${t.videoId || ''}'){this.dataset.fb='2';this.src='https://i.ytimg.com/vi/${t.videoId}/mqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}" 
+                           alt="${escapeHtml(t.title)}" 
+                           class="track-thumb">
+                      <div class="track-cell-info">
+                        <span class="track-cell-title">${cleanDisplayTitle(t.title)}</span>
+                        <span class="track-cell-artist">${escapeHtml(t.artist || 'Artis YouTube')}</span>
+                      </div>
                     </div>
-                  </div>
-                </td>
-                <td>${t.album}</td>
-                <td style="text-align: right; white-space: nowrap;">
-                  <button class="btn-row-add-pl" data-search-row-pl-idx="${i}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:6px; margin-right:4px;" title="Simpan ke Playlist">
-                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/></svg>
-                  </button>
-                  <button class="card-play-btn" style="position: static; opacity: 1; transform: none; width: 32px; height: 32px;" title="Putar">
-                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  </button>
-                </td>
-              </tr>
-            `).join('')}
+                  </td>
+                  <td>${escapeHtml(t.album || 'Single')}</td>
+                  <td style="text-align: right; white-space: nowrap;">
+                    <button class="btn-row-add-pl" data-search-row-pl-idx="${i}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:6px; margin-right:4px;" title="Simpan ke Playlist">
+                      <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/></svg>
+                    </button>
+                    <button class="card-play-btn" style="position: static; opacity: 1; transform: none; width: 32px; height: 32px;" title="Putar">
+                      <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </button>
+                  </td>
+                </tr>
+              `;
+            }).join('')}
           </tbody>
         </table>
+      `;
+    }
+
+    pageContent.innerHTML = `
+      <div style="padding-bottom: 32px;">
+        <h2 class="section-title mb-3">Hasil Pencarian: "${escapeHtml(query)}"</h2>
+        ${categoryBarHtml}
+        ${contentHtml}
       </div>
     `;
 
-    const topCard = document.getElementById("top-result-card");
-    if (topCard) {
-      topCard.addEventListener("click", () => playTrackWithRadio(topResult));
+    bindSearchCategoryChips();
+
+    // Event listeners for different categories
+    if (categoryId === "artists") {
+      pageContent.querySelectorAll("[data-artist-idx]").forEach(card => {
+        card.addEventListener("click", () => {
+          const idx = parseInt(card.getAttribute("data-artist-idx"));
+          const item = results[idx];
+          if (item) {
+            openPlaylist(item.browseId, item.title, item.art);
+          }
+        });
+      });
+    } else if (categoryId === "albums") {
+      pageContent.querySelectorAll("[data-album-idx]").forEach(card => {
+        card.addEventListener("click", () => {
+          const idx = parseInt(card.getAttribute("data-album-idx"));
+          const item = results[idx];
+          if (item) {
+            openPlaylist(item.browseId, item.title, item.art);
+          }
+        });
+      });
+    } else if (categoryId === "playlists") {
+      pageContent.querySelectorAll("[data-playlist-idx]").forEach(card => {
+        card.addEventListener("click", () => {
+          const idx = parseInt(card.getAttribute("data-playlist-idx"));
+          const item = results[idx];
+          if (item) {
+            openPlaylist(item.browseId, item.title, item.art);
+          }
+        });
+      });
+    } else {
+      const tracks = results.filter(r => r.type === "track");
+      const topCard = document.getElementById("top-result-card");
+      if (topCard && tracks.length > 0) {
+        topCard.addEventListener("click", () => playTrackWithRadio(tracks[0]));
+      }
+
+      pageContent.querySelectorAll("[data-search-row-pl-idx]").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const idx = parseInt(btn.getAttribute("data-search-row-pl-idx"));
+          if (tracks[idx]) openSaveToPlaylistModal(tracks[idx]);
+        });
+      });
+
+      pageContent.querySelectorAll("[data-search-idx]").forEach(row => {
+        row.addEventListener("click", () => {
+          const idx = parseInt(row.getAttribute("data-search-idx"));
+          if (tracks[idx]) playTrackWithRadio(tracks[idx]);
+        });
+      });
     }
-
-    pageContent.querySelectorAll("[data-search-row-pl-idx]").forEach(btn => {
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const idx = parseInt(btn.getAttribute("data-search-row-pl-idx"));
-        if (tracks[idx]) openSaveToPlaylistModal(tracks[idx]);
-      });
-    });
-
-    pageContent.querySelectorAll("[data-search-idx]").forEach(row => {
-      row.addEventListener("click", () => {
-        const idx = parseInt(row.getAttribute("data-search-idx"));
-        if (tracks[idx]) playTrackWithRadio(tracks[idx]);
-      });
-    });
   }
 
   // --- 11. Playlist & Library Viewing (Full YouTube Music Integration) ---
@@ -2451,10 +2768,17 @@
     pageContent.innerHTML = `
       <div style="padding: 24px 0;">
         <div class="playlist-hero">
-          <img src="${playlistCover || 'logo.png'}" onerror="this.src='logo.png'" alt="${playlistTitle}" class="playlist-hero-cover" id="pl-hero-cover">
+          <img src="${playlistCover || 'logo.png'}" 
+               referrerpolicy="no-referrer" 
+               loading="lazy" 
+               onerror="this.onerror=null;this.src='logo.png'" 
+               alt="${escapeHtml(playlistTitle)}" 
+               class="playlist-hero-cover" 
+               id="pl-hero-cover"
+               style="${playlistId.startsWith('UC') ? 'border-radius: 50%;' : ''}">
           <div class="playlist-hero-info">
-            <span class="playlist-hero-type">Daftar Putar</span>
-            <h1 class="playlist-hero-title">${playlistTitle}</h1>
+            <span class="playlist-hero-type">${playlistId.startsWith('UC') ? 'Artis' : (playlistId.startsWith('MPRE') ? 'Album' : 'Daftar Putar')}</span>
+            <h1 class="playlist-hero-title">${escapeHtml(playlistTitle)}</h1>
             <span class="playlist-hero-meta" id="pl-hero-meta">Memuat lagu...</span>
           </div>
         </div>
@@ -2558,14 +2882,19 @@
               <td class="track-num">${i + 1}</td>
               <td>
                 <div class="track-title-cell">
-                  <img src="${t.art}" onerror="this.src='logo.png'" alt="${t.title}" class="track-thumb">
+                  <img src="${t.art || (t.videoId ? `https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg` : 'logo.png')}" 
+                       referrerpolicy="no-referrer" 
+                       loading="lazy" 
+                       onerror="if(!this.dataset.fb && '${t.videoId || ''}'){this.dataset.fb='1';this.src='https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg';}else{this.onerror=null;this.src='logo.png';}" 
+                       alt="${escapeHtml(t.title)}" 
+                       class="track-thumb">
                   <div class="track-cell-info">
                     <span class="track-cell-title">${cleanDisplayTitle(t.title)}</span>
-                    <span class="track-cell-artist">${t.artist}</span>
+                    <span class="track-cell-artist">${escapeHtml(t.artist)}</span>
                   </div>
                 </div>
               </td>
-              <td>${t.album || 'Spectro Music'}</td>
+              <td>${escapeHtml(t.album || 'Spectro Music')}</td>
               <td style="text-align: right; white-space: nowrap;">
                 <button class="btn-pl-row-add" data-pl-row-idx="${i}" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; padding:6px; margin-right:4px;" title="Simpan ke Playlist">
                   <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M14 10H3v2h11v-2zm0-4H3v2h11V6zm4 8v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zM3 16h7v-2H3v2z"/></svg>
@@ -2601,9 +2930,9 @@
 
   // --- 12. User Library & Playlists Sync ---
   async function loadUserPlaylists() {
-    renderUserPlaylistsInSidebar(state.userPlaylists || []);
-
     if (!currentSession.is_logged_in) {
+      state.userPlaylists = [];
+      renderUserPlaylistsInSidebar([]);
       return;
     }
 
@@ -2614,6 +2943,41 @@
         const playlists = [];
         const seenIds = new Set();
 
+        function extractCover(item) {
+          if (!item) return "logo.png";
+          const candidateLists = [
+            item.thumbnailRenderer?.croppedSquareThumbnailRenderer?.thumbnail?.thumbnails,
+            item.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails,
+            item.thumbnailRenderer?.musicAnimatedThumbnailRenderer?.backupRenderer?.thumbnail?.thumbnails,
+            item.thumbnailRenderer?.musicResponsiveListItemThumbnailRenderer?.thumbnail?.thumbnails,
+            item.thumbnail?.thumbnails,
+            item.thumbnails
+          ];
+          for (const list of candidateLists) {
+            if (Array.isArray(list) && list.length > 0) {
+              const best = list[list.length - 1]?.url || list[0]?.url;
+              if (best && typeof best === 'string') {
+                return best.startsWith('//') ? 'https:' + best : best;
+              }
+            }
+          }
+          function findThumb(o, depth = 0) {
+            if (!o || typeof o !== 'object' || depth > 5) return null;
+            if (Array.isArray(o.thumbnails) && o.thumbnails.length > 0) {
+              const best = o.thumbnails[o.thumbnails.length - 1]?.url || o.thumbnails[0]?.url;
+              if (best && typeof best === 'string') return best.startsWith('//') ? 'https:' + best : best;
+            }
+            for (const k in o) {
+              if (Object.prototype.hasOwnProperty.call(o, k)) {
+                const found = findThumb(o[k], depth + 1);
+                if (found) return found;
+              }
+            }
+            return null;
+          }
+          return findThumb(item.thumbnailRenderer || item.thumbnail) || "logo.png";
+        }
+
         function walk(obj) {
           if (!obj || typeof obj !== "object") return;
           if (obj.musicTwoRowItemRenderer) {
@@ -2623,9 +2987,20 @@
               seenIds.add(browseId);
               const title = item.title?.runs?.[0]?.text || "Playlist";
               const count = item.subtitle?.runs?.[item.subtitle?.runs?.length - 1]?.text || "Daftar Putar";
-              let cover = "logo.png";
-              const thumbs = item.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails;
-              if (thumbs && thumbs.length > 0) cover = thumbs[thumbs.length - 1].url;
+              const cover = extractCover(item);
+              playlists.push({ id: browseId, title, count, cover });
+            }
+          } else if (obj.musicResponsiveListItemRenderer) {
+            const item = obj.musicResponsiveListItemRenderer;
+            const flex = item.flexColumns || [];
+            const browse = item.navigationEndpoint?.browseEndpoint
+              || flex[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.navigationEndpoint?.browseEndpoint;
+            const browseId = browse?.browseId;
+            if (browseId && (browseId.startsWith("VL") || browseId.startsWith("PL") || browseId.startsWith("RDCLAK")) && !seenIds.has(browseId)) {
+              seenIds.add(browseId);
+              const title = flex[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || "Playlist";
+              const count = flex[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text || "Daftar Putar";
+              const cover = extractCover(item);
               playlists.push({ id: browseId, title, count, cover });
             }
           }
@@ -2674,7 +3049,12 @@
     userCustomPlaylists.innerHTML = combined.map(pl => `
       <div class="playlist-item" data-custom-pl-id="${pl.id}" title="${escapeHtml(pl.title)}">
         <div class="playlist-icon vinyl-gradient">
-          <img src="${pl.cover}" onerror="this.src='logo.png'" alt="${escapeHtml(pl.title)}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">
+          <img src="${escapeHtml(pl.cover)}" 
+               referrerpolicy="no-referrer" 
+               loading="lazy" 
+               alt="${escapeHtml(pl.title)}" 
+               onerror="this.onerror=null; this.src='logo.png';" 
+               style="width: 100%; height: 100%; object-fit: cover; border-radius: 4px;">
         </div>
         <div class="playlist-info">
           <span class="playlist-name">${escapeHtml(pl.title)}</span>
@@ -2819,6 +3199,14 @@
       if (dropdownHandle) dropdownHandle.textContent = currentSession.handle || "@google";
 
       if (currentSession.photo_url && userAvatarImg) {
+        userAvatarImg.referrerPolicy = "no-referrer";
+        userAvatarImg.onerror = () => {
+          userAvatarImg.classList.add("hidden");
+          if (userAvatarInitial) {
+            userAvatarInitial.textContent = (currentSession.name || "U").substring(0, 2).toUpperCase();
+            userAvatarInitial.classList.remove("hidden");
+          }
+        };
         userAvatarImg.src = currentSession.photo_url;
         userAvatarImg.classList.remove("hidden");
         if (userAvatarInitial) userAvatarInitial.classList.add("hidden");
@@ -2832,7 +3220,19 @@
     } else {
       if (btnLogin) btnLogin.classList.remove("hidden");
       if (userBadge) userBadge.classList.add("hidden");
-      loadUserPlaylists();
+      if (userAvatarImg) {
+        userAvatarImg.src = "";
+        userAvatarImg.classList.add("hidden");
+      }
+      if (userAvatarInitial) {
+        userAvatarInitial.textContent = "U";
+        userAvatarInitial.classList.remove("hidden");
+      }
+      if (userName) userName.textContent = "Pengguna";
+      if (dropdownName) dropdownName.textContent = "Pengguna";
+      if (dropdownHandle) dropdownHandle.textContent = "@tamu";
+      state.userPlaylists = [];
+      renderUserPlaylistsInSidebar([]);
     }
   }
 
@@ -2849,6 +3249,12 @@
   }
 
   async function handlePairingSyncSuccess(payload) {
+    // Anti-Re-Pairing Guard: Cannot pair if Windows already has an active account
+    if (currentSession && currentSession.is_logged_in) {
+      console.warn("Anti-Re-Pairing Guard: Windows already has an active account. Discarding incoming pairing attempt.");
+      return;
+    }
+
     const statusBox = document.getElementById("sync-status-indicator");
     const statusText = document.getElementById("sync-status-text");
     if (statusBox) {
@@ -2857,17 +3263,41 @@
       statusBox.style.color = "#2ed573";
     }
     if (statusText) {
-      const uName = payload.name || "Akun Google";
+      const uName = payload.name || "Invisible";
       statusText.innerHTML = `&#10003; Berhasil tersambung dengan <b>${escapeHtml(uName)}</b>! Menyimpan...`;
     }
 
     try {
+      const pairId = payload.pair_id || ("pair_" + (payload.code || ""));
+      if (pairId) localStorage.setItem("spectro_pair_id", pairId);
       if (payload.device) {
         localStorage.setItem("spectro_connected_device", payload.device);
       }
-      await invokeTauri("save_session", { cookies: payload.cookies });
+      const avatarPhoto = payload.photo_base64 
+        ? (payload.photo_base64.startsWith("data:") ? payload.photo_base64 : `data:image/jpeg;base64,${payload.photo_base64}`)
+        : (payload.photo_url || null);
+      applySession({
+        is_logged_in: true,
+        name: payload.name || "Invisible",
+        handle: payload.handle || "@1nv1sibl3",
+        photo_url: avatarPhoto
+      });
+      await invokeTauri("save_session", {
+        cookies: payload.cookies,
+        name: payload.name,
+        handle: payload.handle,
+        photo_url: payload.photo_url,
+        photo_base64: payload.photo_base64,
+        pair_id: pairId
+      });
       await initAuth();
 
+      if (mqttClient && mqttClient.isConnected()) {
+        try {
+          const pairId = payload.pair_id || ("pair_" + (payload.code || ""));
+          if (pairId) mqttClient.subscribe("spectro/pair/" + pairId + "/control", { qos: 0 });
+        } catch (_) {}
+      }
       if (mqttClient && mqttClient.isConnected() && payload.code) {
         try {
           const ack = new Paho.MQTT.Message(JSON.stringify({
@@ -2893,6 +3323,15 @@
     }, 1200);
   }
 
+  let reconnectTimer = null;
+  function scheduleReconnect() {
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = null;
+      initSpectroConnect();
+    }, 4000);
+  }
+
   function initSpectroConnect() {
     if (typeof Paho === "undefined" || !Paho.MQTT) {
       console.warn("Paho MQTT not loaded");
@@ -2900,14 +3339,37 @@
     }
 
     try {
-      mqttClient = new Paho.MQTT.Client("broker.emqx.io", 8084, "/mqtt", MQTT_CLIENT_ID);
+      if (mqttClient) {
+        try {
+          mqttClient.onConnectionLost = null;
+          mqttClient.onMessageArrived = null;
+          if (mqttClient.isConnected()) mqttClient.disconnect();
+        } catch (_) {}
+        mqttClient = null;
+      }
+
+      const freshClientId = "spectro_win_" + Date.now().toString(36) + "_" + Math.random().toString(36).substring(2, 7);
+      mqttClient = new Paho.MQTT.Client("broker.emqx.io", 8084, "/mqtt", freshClientId);
       mqttClient.onConnectionLost = () => {
-        setTimeout(initSpectroConnect, 5000);
+        scheduleReconnect();
       };
       mqttClient.onMessageArrived = async (message) => {
         try {
           const topic = message.destinationName;
           const payload = JSON.parse(message.payloadString);
+
+          // 0. Cross-Device Control & Disconnect Signal
+          const currentPairId = localStorage.getItem("spectro_pair_id");
+          if (currentPairId && topic === ("spectro/pair/" + currentPairId + "/control")) {
+            if (payload && (payload.action === "disconnect" || payload.action === "android_disconnected")) {
+              console.log("Device disconnection signal received from Android:", payload);
+              localStorage.removeItem("spectro_connected_device");
+              if (state.activePage === "settings") {
+                renderSettings();
+              }
+              return;
+            }
+          }
 
           // 1. Account Sync from Spectro Android
           if (topic && topic.startsWith("spectro/sync/pair/")) {
@@ -2939,9 +3401,17 @@
 
       mqttClient.connect({
         useSSL: true,
-        timeout: 5,
+        timeout: 10,
+        keepAliveInterval: 30,
+        cleanSession: true,
         onSuccess: () => {
           mqttClient.subscribe(MQTT_TOPIC, { qos: 0 });
+          const existingPairId = localStorage.getItem("spectro_pair_id");
+          if (existingPairId) {
+            try {
+              mqttClient.subscribe("spectro/pair/" + existingPairId + "/control", { qos: 0 });
+            } catch (_) {}
+          }
           if (activePairingCode) {
             try {
               mqttClient.subscribe(`spectro/sync/pair/${activePairingCode}`, { qos: 0 });
@@ -2949,7 +3419,7 @@
           }
         },
         onFailure: () => {
-          setTimeout(initSpectroConnect, 5000);
+          scheduleReconnect();
         }
       });
     } catch (e) {
@@ -3260,6 +3730,7 @@
             <div style="display: flex; align-items: center; gap: 10px;">
               <span class="badge-status-online">${connectedDevice ? t("status_online") : t("status_ready")}</span>
               <button id="btn-settings-pair-device" class="btn-secondary-action">${connectedDevice ? t("settings_btn_reconnect") : t("settings_btn_pair")}</button>
+              ${connectedDevice ? `<button id="btn-settings-disconnect-device" class="btn-secondary-action" style="color: #ff4757; border-color: rgba(255, 71, 87, 0.4);">${t("settings_btn_disconnect")}</button>` : ""}
             </div>
           </div>
         </div>
@@ -3379,6 +3850,22 @@
   }
 
   function setupSettingsPageListeners() {
+    const btnDisconnectDev = document.getElementById("btn-settings-disconnect-device");
+    if (btnDisconnectDev) {
+      btnDisconnectDev.addEventListener("click", async () => {
+        localStorage.removeItem("spectro_connected_device");
+        localStorage.removeItem("spectro_pair_id");
+        localStorage.removeItem("spectro_liked_songs");
+        state.userPlaylists = [];
+        state.likedTracks = [];
+        renderUserPlaylistsInSidebar([]);
+        await invokeTauri("logout");
+        applySession({ is_logged_in: false, name: "Pengguna", handle: null, photo_url: null });
+        renderSettings();
+        showToast(currentLang === "en" ? "Disconnected from phone. Switched to Guest mode." : "Koneksi ke HP diputuskan. Mode Guest aktif.");
+      });
+    }
+
     const btnPair = document.getElementById("btn-settings-pair-device");
     if (btnPair) {
       btnPair.addEventListener("click", () => {
@@ -3771,6 +4258,30 @@
     }
 
     function updatePairingUI(code) {
+      const unpairedView = document.getElementById("modal-pairing-unpaired");
+      const pairedView = document.getElementById("modal-pairing-paired");
+      if (currentSession && currentSession.is_logged_in) {
+        if (unpairedView) unpairedView.classList.add("hidden");
+        if (pairedView) {
+          pairedView.classList.remove("hidden");
+          const pairedName = document.getElementById("modal-paired-name");
+          if (pairedName) pairedName.textContent = currentSession.name || "Akun Google";
+          const pairedHandle = document.getElementById("modal-paired-handle");
+          if (pairedHandle) pairedHandle.textContent = currentSession.handle || "@google";
+          const btnModalLogout = document.getElementById("btn-modal-logout");
+          if (btnModalLogout) {
+            btnModalLogout.onclick = () => {
+              if (loginModal) loginModal.classList.add("hidden");
+              if (btnLogout) btnLogout.click();
+            };
+          }
+        }
+        return;
+      }
+
+      if (unpairedView) unpairedView.classList.remove("hidden");
+      if (pairedView) pairedView.classList.add("hidden");
+
       activePairingCode = code;
       const pairDisplay = document.getElementById("sync-pair-code");
       if (pairDisplay) {
@@ -3864,13 +4375,26 @@
 
     if (btnLogout) {
       btnLogout.addEventListener("click", async () => {
+        if (userMenuDropdown) userMenuDropdown.classList.add("hidden");
+        localStorage.removeItem("spectro_connected_device");
+        localStorage.removeItem("spectro_pair_id");
+        localStorage.removeItem("spectro_liked_songs");
+        state.userPlaylists = [];
+        state.likedTracks = [];
+        renderUserPlaylistsInSidebar([]);
         await invokeTauri("logout");
-        applySession({ is_logged_in: false });
+        applySession({ is_logged_in: false, name: "Pengguna", handle: null, photo_url: null });
+        if (state.activePage === "settings") {
+          renderSettings();
+        } else if (state.activePage === "library") {
+          renderLibrary();
+        }
+        showToast(currentLang === "en" ? "Logged out successfully. Switched to Guest mode." : "Berhasil keluar dari akun. Mode Guest aktif.");
       });
     }
   }
 
-  const APP_VERSION = "1.0.0";
+  const APP_VERSION = "1.0.1";
   function checkVersionMigration() {
     try {
       const storedVer = localStorage.getItem("spectro_version");

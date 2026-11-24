@@ -38,7 +38,7 @@
 
         <!-- If logged in -->
         <div id="user-badge" class="user-badge hidden" title="Profil Pengguna (Klik untuk opsi)" data-tauri-drag-region="false">
-          <img id="user-avatar-img" class="user-avatar-img hidden" src="" alt="Avatar">
+          <img id="user-avatar-img" class="user-avatar-img hidden" src="" alt="Avatar" referrerpolicy="no-referrer">
           <span id="user-avatar-initial" class="user-avatar">NY</span>
           <span id="user-name" class="user-name">Pengguna</span>
         </div>
@@ -271,48 +271,72 @@
         <button id="btn-close-login-modal" class="modal-close-btn" style="font-size: 1.5rem; line-height: 1;">&times;</button>
       </div>
 
-      <div style="margin-bottom: 12px;">
-        <div style="width: 52px; height: 52px; border-radius: 50%; background: rgba(0, 229, 255, 0.12); border: 2px solid #00e5ff; color: #00e5ff; display: inline-flex; align-items: center; justify-content: center;">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
-            <line x1="12" y1="18" x2="12.01" y2="18"></line>
+      <!-- Unpaired View (Generate 6-digit PIN) -->
+      <div id="modal-pairing-unpaired">
+        <div style="margin-bottom: 12px;">
+          <div style="width: 52px; height: 52px; border-radius: 50%; background: rgba(0, 229, 255, 0.12); border: 2px solid #00e5ff; color: #00e5ff; display: inline-flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+              <line x1="12" y1="18" x2="12.01" y2="18"></line>
+            </svg>
+          </div>
+        </div>
+        <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 6px; color: #fff;">Sinkronkan dari Spectro Android</h3>
+        <p style="font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary); margin-bottom: 16px;">
+          Hubungkan akun YouTube Music kamu ke PC secara instan menggunakan kode sanding di bawah ini:
+        </p>
+
+        <!-- 6-Digit Pairing Code Card -->
+        <div style="background: rgba(0, 229, 255, 0.05); border: 1.5px dashed #00e5ff; border-radius: 12px; padding: 16px; margin-bottom: 14px;">
+          <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 6px;">KODE SANDING WINDOWS</div>
+          <div id="sync-pair-code" style="font-size: 2.2rem; font-weight: 800; letter-spacing: 6px; color: #00e5ff; font-family: monospace;">--- ---</div>
+          <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
+            <button id="btn-copy-pair-code" style="padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+              <span id="btn-copy-text">Salin Kode</span>
+            </button>
+            <button id="btn-refresh-pair-code" title="Buat kode baru" style="padding: 6px 12px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #aaa; font-size: 0.78rem; cursor: pointer;">
+              &#x21bb; Baru
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Waiting Status -->
+        <div id="sync-status-indicator" style="padding: 10px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 0.8rem; color: #aaa; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px;">
+          <svg style="animation: spin 1.2s linear infinite;" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#00e5ff" stroke-width="2.5">
+            <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-linecap="round"></circle>
           </svg>
+          <span id="sync-status-text">Menunggu sambungan dari Spectro HP...</span>
         </div>
-      </div>
-      <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 6px; color: #fff;">Sinkronkan dari Spectro Android</h3>
-      <p style="font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary); margin-bottom: 16px;">
-        Hubungkan akun YouTube Music kamu ke PC secara instan menggunakan kode sanding di bawah ini:
-      </p>
 
-      <!-- 6-Digit Pairing Code Card -->
-      <div style="background: rgba(0, 229, 255, 0.05); border: 1.5px dashed #00e5ff; border-radius: 12px; padding: 16px; margin-bottom: 14px;">
-        <div style="font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1.5px; color: var(--text-muted); margin-bottom: 6px;">KODE SANDING WINDOWS</div>
-        <div id="sync-pair-code" style="font-size: 2.2rem; font-weight: 800; letter-spacing: 6px; color: #00e5ff; font-family: monospace;">--- ---</div>
-        <div style="margin-top: 10px; display: flex; align-items: center; justify-content: center; gap: 8px;">
-          <button id="btn-copy-pair-code" style="padding: 6px 14px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #fff; font-size: 0.78rem; cursor: pointer; display: flex; align-items: center; gap: 6px;">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            <span id="btn-copy-text">Salin Kode</span>
-          </button>
-          <button id="btn-refresh-pair-code" title="Buat kode baru" style="padding: 6px 12px; border-radius: 6px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15); color: #aaa; font-size: 0.78rem; cursor: pointer;">
-            &#x21bb; Baru
-          </button>
+        <!-- 3 Simple Steps -->
+        <div style="text-align: left; background: rgba(255,255,255,0.02); border-radius: 8px; padding: 12px 14px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px;">
+          <div style="font-weight: 600; color: #ddd; margin-bottom: 4px;">Cara Menghubungkan dari HP:</div>
+          <div>1. Buka aplikasi <b>Spectro</b> di HP Android Anda.</div>
+          <div>2. Masuk ke <b>Pengaturan</b> &rarr; ketuk <b>"Sinkronkan ke PC / Windows"</b>.</div>
+          <div>3. Masukkan kode 6 digit di atas lalu tekan <b>Kirim</b>.</div>
         </div>
       </div>
 
-      <!-- Live Waiting Status -->
-      <div id="sync-status-indicator" style="padding: 10px 14px; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 8px; font-size: 0.8rem; color: #aaa; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px;">
-        <svg style="animation: spin 1.2s linear infinite;" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="#00e5ff" stroke-width="2.5">
-          <circle cx="12" cy="12" r="10" stroke-dasharray="32" stroke-linecap="round"></circle>
-        </svg>
-        <span id="sync-status-text">Menunggu sambungan dari Spectro HP...</span>
-      </div>
-
-      <!-- 3 Simple Steps -->
-      <div style="text-align: left; background: rgba(255,255,255,0.02); border-radius: 8px; padding: 12px 14px; font-size: 0.8rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 16px;">
-        <div style="font-weight: 600; color: #ddd; margin-bottom: 4px;">Cara Menghubungkan dari HP:</div>
-        <div>1. Buka aplikasi <b>Spectro</b> di HP Android Anda.</div>
-        <div>2. Masuk ke <b>Pengaturan</b> &rarr; ketuk <b>"Sinkronkan ke PC / Windows"</b>.</div>
-        <div>3. Masukkan kode 6 digit di atas lalu tekan <b>Kirim</b>.</div>
+      <!-- Paired Lockout View (Anti-Re-Pairing Guard) -->
+      <div id="modal-pairing-paired" class="hidden">
+        <div style="margin-bottom: 12px;">
+          <div style="width: 52px; height: 52px; border-radius: 50%; background: rgba(46, 213, 115, 0.12); border: 2px solid #2ed573; color: #2ed573; display: inline-flex; align-items: center; justify-content: center;">
+            <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M20 6L9 17l-5-5"></path>
+            </svg>
+          </div>
+        </div>
+        <h3 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 6px; color: #fff;">Akun Sudah Terhubung</h3>
+        <p style="font-size: 0.85rem; line-height: 1.5; color: var(--text-secondary); margin-bottom: 16px;">
+          Spectro Windows saat ini telah tersambung dengan akun <b id="modal-paired-name" style="color: #00e5ff;">Akun Google</b> (<span id="modal-paired-handle" style="color: #aaa;">@user</span>).
+        </p>
+        <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 14px; margin-bottom: 18px; font-size: 0.82rem; color: var(--text-muted); line-height: 1.5;">
+          Untuk mengganti atau menghubungkan akun lain, Anda harus keluar (logout) dari akun ini terlebih dahulu.
+        </div>
+        <button id="btn-modal-logout" style="width: 100%; padding: 10px 18px; border-radius: 8px; background: rgba(255, 71, 87, 0.15); border: 1px solid rgba(255, 71, 87, 0.4); color: #ff4757; font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s;" onmouseover="this.style.background='rgba(255, 71, 87, 0.25)'" onmouseout="this.style.background='rgba(255, 71, 87, 0.15)'">
+          Keluar dari Akun (Logout)
+        </button>
       </div>
     </div>
   </div>

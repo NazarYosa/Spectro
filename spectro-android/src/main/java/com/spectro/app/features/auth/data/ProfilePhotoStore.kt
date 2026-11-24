@@ -1,4 +1,4 @@
-﻿package com.spectro.app.features.auth.data
+package com.spectro.app.features.auth.data
 
 // Android context and images
 import android.content.Context
@@ -33,6 +33,19 @@ object ProfilePhotoStore {
     // Empty when there is no photo or it cannot be read
     suspend fun load(context: Context): ImageBitmap? = withContext(Dispatchers.IO) {
         photoFile(context).takeIf { it.exists() }?.let { BitmapFactory.decodeFile(it.path)?.asImageBitmap() }
+    }
+
+    // URL of the photo on the device, null when not available
+    suspend fun getPhotoUrl(context: Context): String? = withContext(Dispatchers.IO) {
+        urlFile(context).takeIf { it.exists() }?.readText()?.trim()?.takeIf { it.isNotBlank() }
+    }
+
+    // Raw photo bytes on the device, null when not available
+    fun getPhotoBytes(context: Context): ByteArray? {
+        val file = photoFile(context)
+        return if (file.exists() && file.length() > 0) {
+            try { file.readBytes() } catch (_: Exception) { null }
+        } else null
     }
 
     // Removes the photo and its address from the device

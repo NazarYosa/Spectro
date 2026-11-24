@@ -1,7 +1,7 @@
 {
   "name": "spectro",
   "productName": "Spectro",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Spectro Music Desktop Player",
   "main": "main.js",
   "author": "Nazar Yosa",
@@ -37,7 +37,9 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName": "Spectro",
-      "artifactName": "Spectro-Setup.${ext}"
+      "artifactName": "Spectro-Setup.${ext}",
+      "deleteAppDataOnUninstall": true,
+      "include": "installer.nsh"
     },
     "portable": {
       "artifactName": "Spectro.${ext}"

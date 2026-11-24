@@ -1,6 +1,7 @@
 package com.spectro.app.features.settings.ui
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,13 +14,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,8 +53,7 @@ import com.spectro.app.features.settings.ui.components.SettingsPage
 fun DesktopSyncScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
-    val prefs = remember { context.getSharedPreferences("spectro_connect", android.content.Context.MODE_PRIVATE) }
-    var connectedDevice by remember { mutableStateOf(prefs.getString("connected_device", null)) }
+    val connectedDevice by SpectroConnectManager.connectedDeviceFlow.collectAsState()
     var pairingCode by remember { mutableStateOf("") }
     var isSending by remember { mutableStateOf(false) }
 
@@ -65,8 +68,6 @@ fun DesktopSyncScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         SpectroConnectManager.syncAccountToDesktop(clean, context) { success, err ->
             isSending = false
             if (success) {
-                prefs.edit().putString("connected_device", "Spectro Windows (Desktop PC)").apply()
-                connectedDevice = "Spectro Windows (Desktop PC)"
                 Toast.makeText(context, context.getString(R.string.sync_desktop_success), Toast.LENGTH_LONG).show()
                 onBack()
             } else {
@@ -100,6 +101,25 @@ fun DesktopSyncScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
                         fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onBackground
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = {
+                            SpectroConnectManager.disconnect(context) {
+                                Toast.makeText(context, "Koneksi ke Windows telah diputuskan.", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = MaterialTheme.colorScheme.error
+                        ),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Putuskan Koneksi Desktop",
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
             }
         }

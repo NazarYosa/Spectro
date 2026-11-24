@@ -3,6 +3,7 @@ package com.spectro.app.features.home.data
 // JSON helpers of the YouTube Music answers
 import com.spectro.app.core.innertube.arrayAt
 import com.spectro.app.core.innertube.at
+import com.spectro.app.core.innertube.findObjects
 import com.spectro.app.core.innertube.objectAt
 import com.spectro.app.core.innertube.objects
 import com.spectro.app.core.innertube.stringAt
@@ -89,9 +90,13 @@ object HomeParser {
         val grid = list?.arrayAt("contents").objects().firstNotNullOfOrNull { block ->
             block.objectAt("gridRenderer")
                 ?: block.arrayAt("itemSectionRenderer", "contents").objects().firstNotNullOfOrNull { it.objectAt("gridRenderer") }
+        } ?: response.findObjects("gridRenderer").firstOrNull()
+
+        val rawItems = (grid?.arrayAt("items").objects() + grid?.arrayAt("contents").objects()).ifEmpty {
+            response.findObjects("musicTwoRowItemRenderer").map { JSONObject().put("musicTwoRowItemRenderer", it) }
         }
 
-        return grid?.arrayAt("items").objects().mapNotNull { item ->
+        return rawItems.mapNotNull { item ->
             val row = item.objectAt("musicTwoRowItemRenderer") ?: return@mapNotNull null
             parseTwoRow(row)?.let { parsed ->
                 if (parsed.kind == HomeItemKind.Playlist) parsed.copy(countText = lastText(row.arrayAt("subtitle", "runs"))) else parsed
@@ -212,7 +217,7 @@ object HomeParser {
                 playlistId = playEndpoint?.stringAt("watchPlaylistEndpoint", "playlistId")
             )
 
-            pageType == PagePlaylist || (pageType == null && (browseId?.startsWith("VLPL") == true || browseId?.startsWith("PL") == true || browseId?.startsWith("RDCLAK") == true)) -> HomeItem(
+            pageType == PagePlaylist || (pageType == null && (browseId?.startsWith("VL") == true || browseId?.startsWith("PL") == true || browseId?.startsWith("RDCLAK") == true)) -> HomeItem(
                 kind = HomeItemKind.Playlist,
                 id = (browseId ?: return null).removePrefix(PlaylistPagePrefix),
                 title = title,

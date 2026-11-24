@@ -78,10 +78,28 @@ Every playback session across Android and Windows must adhere strictly to the fo
    - Android shows: `Connected with: Spectro Windows (Desktop PC)`.
    - Windows shows: `Connected with: Android (<Device Model>)`.
    - Both clients exchange two-way ACK payloads upon pairing.
+3. **Decoupled Session Lifecycle & Independent Logout**:
+   - **Independent Device Lifecycles**: Logging out on Android does **NOT** log out Windows, and logging out on Windows does **NOT** log out Android. Each device manages its account session independently.
+   - **Clean Windows Guest Mode Reversion**: When Spectro Windows logs out, all account data, imported playlists (`state.userPlaylists`), liked tracks (`state.likedTracks`), and session tokens **MUST BE COMPLETELY PURGED**, returning the desktop application cleanly to Guest mode.
+4. **Anti-Re-Pairing Guard (Single Active Account Constraint)**:
+   - Once Spectro Windows has paired an account (`is_logged_in: true`), it **CANNOT** accept incoming pairing sync packets or generate new pairing codes until the user explicitly logs out first.
+   - The pairing modal and settings interface must display "Akun Sudah Terhubung" and prompt the user to log out first before attempting to pair a different device or account.
 
 ---
 
-## 5. Audio Engine & Equalizer
+## 5. Platform Resource & Footprint Constraints
+
+1. **Android Package & Storage Ceiling**:
+   - **Strict Size Limit**: The Android universal APK package size and initial storage consumption **MUST NEVER EXCEED 21 MB**.
+   - Per-ABI APK builds (`arm64-v8a`, `armeabi-v7a`) must remain strictly under 15 MB.
+   - ProGuard/R8 code shrinking and resource optimization must be actively maintained to preserve lightweight app delivery.
+2. **Windows Desktop Resource & Memory Optimization**:
+   - The Windows executable size, runtime memory (RAM) footprint, and background process consumption must be aggressively minimized without degrading audio quality, removing features, or introducing bugs.
+   - Idle background audio nodes, redundant listeners, and cached image buffers must be freed immediately upon navigation or session change.
+
+---
+
+## 6. Audio Engine & Equalizer
 
 1. **Real-Time Web Audio API Pipeline (Windows)**:
    - Uses an active `AudioContext` connected directly to the audio element via `createMediaElementSource`.
@@ -98,7 +116,7 @@ Every playback session across Android and Windows must adhere strictly to the fo
 
 ---
 
-## 6. UX & Localization Standards
+## 7. UX & Localization Standards
 
 1. **User-Friendly, Non-Technical Language**:
    - All user-facing strings must use friendly, natural phrasing (e.g., "Account Synchronization" instead of "MQTT Cloud Broker Relay", "Display Language" instead of "i18n Locale Selector", "Audio Quality" instead of "Bitrate & Opus Profile").
@@ -109,7 +127,78 @@ Every playback session across Android and Windows must adhere strictly to the fo
 
 ---
 
-## 7. Project Structure
+## 8. Unified Versioning & Release Artifact Specification
+
+To eliminate discrepancies between release tags, installed binaries, and downloaded filenames, all platforms and build pipelines must strictly comply with the **Spectro Unified Versioning Specification**:
+
+### 1. Single Global Version Truth (Semantic Versioning)
+- Version format strictly follows Semantic Versioning: `MAJOR.MINOR.PATCH` (e.g., `1.0.0`).
+- **Zero Version Drift**: Android and Windows **MUST ALWAYS SHARE THE EXACT SAME VERSION NUMBER**. It is strictly forbidden for Android to be on `v1.0.5` while Windows is on `v1.0.0` or vice versa.
+
+### 2. Synchronized Version Inventory
+Whenever bumping the version number, the following files **MUST BE UPDATED IN LOCKSTEP**:
+1. **Android Application**:
+   - `spectro-android/build.gradle.kts`:
+     ```kotlin
+     val appVersionName = "1.0.1"
+     ```
+     *(The `versionCode` is computed automatically: `major * 10000 + minor * 100 + patch`).*
+2. **Windows Desktop Application**:
+   - `spectro-windows/package.json`:
+     ```json
+     "version": "1.0.1"
+     ```
+   - `spectro-windows/dist/app.js`:
+     ```javascript
+     const APP_VERSION = "1.0.1";
+     ```
+3. **Repository Documentation & Release References**:
+   - `RULES.md`: Verify active version specification.
+   - `README.md`: Update latest release badge and download references.
+   - `docs/BUILD_GUIDE.md`: Update build command and artifact paths.
+
+### 3. Standardized Release Artifact Naming Convention
+All compiled binaries published to GitHub Releases or distributed to end users **MUST STRICTLY ADHERE** to the following naming pattern matching the active release version:
+
+| Platform | Target Architecture | Official Release Artifact Name | Internal Output Path |
+| :--- | :--- | :--- | :--- |
+| **Android** | Universal (All Devices) | `Spectro-v<version>-universal.apk` | `spectro-android/build/outputs/apk/release/` |
+| **Android** | 64-bit ARM (arm64-v8a) | `Spectro-v<version>-arm64-v8a.apk` | `spectro-android/build/outputs/apk/release/` |
+| **Android** | 32-bit ARM (armeabi-v7a) | `Spectro-v<version>-armeabi-v7a.apk` | `spectro-android/build/outputs/apk/release/` |
+| **Windows** | 64-bit Setup Installer (NSIS) | `Spectro-v<version>-Setup.exe` / `Spectro-Setup.exe` | `spectro-windows/release-build/` |
+| **Windows** | 64-bit Portable Executable | `Spectro-v<version>-Portable.exe` / `Spectro.exe` | `spectro-windows/release-build/` |
+
+### 4. Binary Integrity & Anti-Stale Build Guard
+- **Pre-Build Verification**: Before releasing or tagging a version, the build pipeline must verify that the compiled `BuildConfig.VERSION_NAME` in the APK and the `productVersion` in the Windows executable match the target release tag.
+- **Obsolete Binary Purge**: Build directories (`build/outputs/apk/release/` and `release-build/`) must be cleaned prior to release assembly to prevent bundling stale binaries from prior builds.
+
+---
+
+## 9. Search Categories & Media Thumbnail Fallback Integrity
+
+1. **Interactive Category Filtering**:
+   - The search interface must provide YouTube Music-style category filter pills:
+     - **Semua (All)**: `params: null`
+     - **Lagu (Songs)**: `params: "EgWKAQIIAWoKEAkQBRAKEAMQBA=="`
+     - **Video (Videos)**: `params: "EgWKAQIQAWoKEAkQChAFEAMQBA=="`
+     - **Artis (Artists)**: `params: "EgWKAQIgAWoKEAkQChAFEAMQBA=="`
+     - **Album (Albums)**: `params: "EgWKAQIYAWoKEAkQChAFEAMQBA=="`
+     - **Playlist (Playlists)**: `params: "EgeKAQQoAEABagoQAxAEEAoQCRAF"`
+   - Switching categories retains the active search query and dynamically re-queries InnerTube without reloading the view.
+   - Artists are presented in a circular avatar card grid (`border-radius: 50%`), Albums and Playlists in square cover card grids, and Songs/Videos in a detailed track table.
+
+2. **Guaranteed Multi-Tier Thumbnail Fallback**:
+   - Track thumbnails must never degrade to the generic app logo (`logo.png`) when a valid YouTube `videoId` exists.
+   - Image fallback hierarchy:
+     1. `t.art` (Original high-resolution InnerTube thumbnail URL)
+     2. `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`
+     3. `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`
+     4. `logo.png` (Terminal fallback only if no video ID exists)
+   - All image elements must include `referrerpolicy="no-referrer"` to prevent Google CDN `403 Forbidden` errors.
+
+---
+
+## 10. Project Structure
 
 ```
 Spectro/
@@ -121,6 +210,7 @@ Spectro/
 │   ├── main.js                # Main Process, IPC Handlers, Window Management
 │   ├── preload.js             # Secure Context Bridge
 │   ├── package.json           # Electron & Builder Config (Version 1.0.0)
+│   ├── installer.nsh          # NSIS Custom Uninstallation Script
 │   ├── clean_spectro.cmd      # System & Cache Maintenance Script
 │   └── dist/                  # UI Application (index.html, app.js, style.css)
 ├── docs/                      # Comprehensive Technical Documentation

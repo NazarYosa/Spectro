@@ -1,4 +1,4 @@
-﻿package com.spectro.app.features.settings.ui
+package com.spectro.app.features.settings.ui
 
 // Android version
 import android.os.Build
@@ -113,8 +113,7 @@ private fun GroupCard(group: SettingsGroup, onSectionClick: (SettingsSection) ->
             color = MaterialTheme.colorScheme.surfaceContainer
         ) {
             Column {
-                // The system only lets an app ask for the links from Android 12
-                val sections = group.sections.filter { it != SettingsSection.Links || Build.VERSION.SDK_INT >= Build.VERSION_CODES.S }
+                val sections = group.sections
                 sections.forEachIndexed { index, section ->
                     if (index > 0) {
                         HorizontalDivider(

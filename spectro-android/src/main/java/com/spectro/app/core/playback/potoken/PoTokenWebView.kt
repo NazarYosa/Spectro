@@ -322,7 +322,7 @@ class PoTokenWebView private constructor(
         private const val YouTubeOrigin = "https://www.youtube.com"
         private const val CreateUrl = "$YouTubeOrigin/api/jnn/v1/Create"
         private const val GenerateItUrl = "$YouTubeOrigin/api/jnn/v1/GenerateIT"
-        private val GoogleApiKey = String(java.util.Base64.getDecoder().decode("QUl6YVN5RHlUNVcwSmg0OUYzMFBxcXR5ZmRmN3BETEZLTEpvQW53"))
+        private val GoogleApiKey = byteArrayOf(65, 73, 122, 97, 83, 121, 68, 121, 84, 53, 87, 48, 74, 104, 52, 57, 70, 51, 48, 80, 113, 113, 116, 121, 102, 100, 102, 55, 112, 68, 76, 70, 75, 76, 74, 111, 65, 110, 119).toString(Charsets.UTF_8)
         private const val RequestKey = "O43z0dpjhgX20SCx4KAo"
         private const val UserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.3"

@@ -20,27 +20,32 @@ suspend fun currentSession(context: Context): YouTubeSession {
     val entry = entryStore.entry.first()
     val storedCookies = accountStore.cookies.first()
 
-    val webCookies = withContext(Dispatchers.Main) {
+    val musicCookies = withContext(Dispatchers.Main) {
         val cm = CookieManager.getInstance()
-        val musicCookies = cm.getCookie(MusicOrigin).orEmpty()
-        val ytCookies = cm.getCookie("https://www.youtube.com").orEmpty()
-        val googleCookies = cm.getCookie("https://accounts.google.com").orEmpty()
-        listOf(musicCookies, ytCookies, googleCookies).filter { it.isNotBlank() }.joinToString("; ")
+        cm.getCookie(MusicOrigin).orEmpty()
     }
 
-    val hasAuthCookies = (webCookies.isNotBlank() && (webCookies.contains("SAPISID=") || webCookies.contains("__Secure-3PAPISID="))) ||
-        (storedCookies?.let { it.contains("SAPISID=") || it.contains("__Secure-3PAPISID=") } == true)
+    val isAuth = { s: String? ->
+        !s.isNullOrBlank() && (s.contains("SAPISID=") || s.contains("__Secure-3PAPISID="))
+    }
 
+    val hasAuthCookies = isAuth(musicCookies) || isAuth(storedCookies)
     val isGoogle = entry == Entry.Google || hasAuthCookies
 
+    // Prefer clean MusicOrigin cookies directly; fall back to storedCookies in AccountStore
     val cookies = if (isGoogle) {
-        if (webCookies.isNotBlank() && (webCookies.contains("SAPISID=") || webCookies.contains("__Secure-3PAPISID="))) {
-            webCookies
-        } else {
-            storedCookies ?: webCookies.takeIf { it.isNotBlank() }
+        when {
+            isAuth(musicCookies) -> musicCookies
+            isAuth(storedCookies) -> storedCookies
+            else -> musicCookies.ifBlank { storedCookies }
         }
     } else {
         null
+    }
+
+    // Keep stored cookies synced if musicCookies is freshly active
+    if (isAuth(musicCookies) && musicCookies != storedCookies) {
+        accountStore.saveCookies(musicCookies)
     }
 
     // Ensure EntryStore is kept in sync if authentication cookies are active

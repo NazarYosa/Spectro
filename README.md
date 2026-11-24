@@ -6,7 +6,7 @@
 
 ### High-Fidelity YouTube Music Client for Android & Windows
 
-[![Release](https://img.shields.io/badge/RELEASE-v1.0.0-00E5FF?style=flat-square&labelColor=0d1117)](https://github.com/NazarYosa/Spectro/releases)
+[![Release](https://img.shields.io/badge/RELEASE-v1.0.1-00E5FF?style=flat-square&labelColor=0d1117)](https://github.com/NazarYosa/Spectro/releases)
 [![Stars](https://img.shields.io/github/stars/NazarYosa/Spectro?style=flat-square&labelColor=0d1117&color=0070F3)](https://github.com/NazarYosa/Spectro/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/NazarYosa/Spectro/total?style=flat-square&labelColor=0d1117&color=3DDC84)](https://github.com/NazarYosa/Spectro/releases)
 [![Android](https://img.shields.io/badge/ANDROID-8.0%2B-3DDC84?style=flat-square&labelColor=0d1117&logo=android&logoColor=white)](https://github.com/NazarYosa/Spectro/releases)
@@ -75,9 +75,9 @@
 Visit the [GitHub Releases](https://github.com/NazarYosa/Spectro/releases) page to download pre-built installers:
 
 ### 📱 Android (Android 8.0+)
-- **`Spectro-v1.0.0-universal.apk`**: Compatible with all Android devices (recommended).
-- **`Spectro-v1.0.0-arm64-v8a.apk`**: Optimized for modern 64-bit devices (smaller file size).
-- **`Spectro-v1.0.0-armeabi-v7a.apk`**: For older 32-bit devices.
+- **`Spectro-v1.0.1-universal.apk`**: Compatible with all Android devices (recommended).
+- **`Spectro-v1.0.1-arm64-v8a.apk`**: Optimized for modern 64-bit devices (smaller file size).
+- **`Spectro-v1.0.1-armeabi-v7a.apk`**: For older 32-bit devices.
 
 ### 💻 Windows (Windows 10 / 11)
 - **`Spectro-Setup.exe`**: Standard Windows installer wizard with automatic start menu and desktop shortcuts (recommended).
