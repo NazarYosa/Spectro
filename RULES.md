@@ -140,17 +140,17 @@ Whenever bumping the version number, the following files **MUST BE UPDATED IN LO
 1. **Android Application**:
    - `spectro-android/build.gradle.kts`:
      ```kotlin
-     val appVersionName = "1.0.1"
+     val appVersionName = "1.0.5"
      ```
      *(The `versionCode` is computed automatically: `major * 10000 + minor * 100 + patch`).*
 2. **Windows Desktop Application**:
    - `spectro-windows/package.json`:
      ```json
-     "version": "1.0.1"
+     "version": "1.0.5"
      ```
    - `spectro-windows/dist/app.js`:
      ```javascript
-     const APP_VERSION = "1.0.1";
+     const APP_VERSION = "1.0.5";
      ```
 3. **Repository Documentation & Release References**:
    - `RULES.md`: Verify active version specification.
