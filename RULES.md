@@ -189,6 +189,12 @@ All compiled binaries published to GitHub Releases or distributed to end users *
    - Requests for images (`resourceType === 'image'` or domains `googleusercontent.com`, `ggpht.com`, `gstatic.com`, `i.ytimg.com`) must have `Origin`, `Referer`, and `Sec-Fetch-Site` stripped to bypass Google CDN `403 Forbidden` restrictions.
 3. **Cross-Origin & Frame Security Stripping**:
    - Restrictive headers (`x-frame-options`, `content-security-policy`) must be dynamically stripped, and `Access-Control-Allow-Origin: *` injected for all internal resources.
+4. **Iframe Handshake & Origin Protocol**:
+   - In `YT.Player`, `origin` in `playerVars` **MUST** strictly match the hosting document's origin (`window.location.origin`). Specifying the remote domain (`https://www.youtube-nocookie.com`) causes Chromium to abort the postMessage handshake with `The target origin provided does not match the recipient window's origin`, silently discarding player state changes.
+5. **CORS Duplicate Header Suppression**:
+   - In `onHeadersReceived`, existing `Access-Control-Allow-Origin` and `Access-Control-Allow-Credentials` headers must be stripped case-insensitively before setting new values to prevent Chromium from failing media chunk requests with `The 'Access-Control-Allow-Origin' header contains multiple values`.
+6. **Playback Pipeline Variable Invariance (`loadTrack`)**:
+   - Inside `loadTrack(index)`, the active track object (`const track = state.queue[index]`) must always be guarded and resolved before executing media updates or thumbnail fallbacks to prevent fatal `ReferenceError` crashes.
 
 ---
 
