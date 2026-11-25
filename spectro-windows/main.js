@@ -225,15 +225,28 @@ function createWindow() {
     callback({ cancel: false, requestHeaders: details.requestHeaders });
   });
 
-  // Strip restrictive headers and allow cross-origin for all media & images
+  // Strip restrictive headers and allow nocookie origin
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = Object.assign({}, details.responseHeaders);
-    delete responseHeaders['x-frame-options'];
-    delete responseHeaders['X-Frame-Options'];
-    delete responseHeaders['content-security-policy'];
-    delete responseHeaders['Content-Security-Policy'];
-    responseHeaders['access-control-allow-origin'] = ['*'];
-    responseHeaders['access-control-allow-credentials'] = ['true'];
+    for (const key of Object.keys(responseHeaders)) {
+      const lower = key.toLowerCase();
+      if (
+        lower === 'x-frame-options' ||
+        lower === 'content-security-policy' ||
+        lower === 'access-control-allow-origin' ||
+        lower === 'access-control-allow-credentials'
+      ) {
+        delete responseHeaders[key];
+      }
+    }
+
+    const u = details.url.toLowerCase();
+    if (u.includes('youtube') || u.includes('googlevideo.com')) {
+      responseHeaders['access-control-allow-origin'] = ['https://www.youtube-nocookie.com'];
+      responseHeaders['access-control-allow-credentials'] = ['true'];
+    } else {
+      responseHeaders['access-control-allow-origin'] = ['*'];
+    }
     callback({ cancel: false, responseHeaders });
   });
 

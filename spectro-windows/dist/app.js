@@ -551,7 +551,7 @@
             playsinline: 1,
             rel: 0,
             enablejsapi: 1,
-            origin: "https://www.youtube-nocookie.com"
+            origin: window.location.origin
           },
           events: {
             onReady: () => {
@@ -1128,6 +1128,10 @@
       selectTrackLyrics.innerHTML = '<option value="">Memuat sumber...</option>';
       selectTrackLyrics.disabled = true;
     }
+
+    const track = state.queue[index];
+    if (!track) return;
+    saveRecentlyPlayed(track);
 
     const ytVid = track.videoId || track.id;
     const safeArt = track.art || (ytVid ? `https://i.ytimg.com/vi/${ytVid}/hqdefault.jpg` : "logo.png");
