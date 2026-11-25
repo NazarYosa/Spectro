@@ -45,7 +45,10 @@ jobs:
       - name: Check existing release
         id: existing
         run: |
-          if gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "Workflow manually dispatched; enforcing full build and asset upload."
+          elif gh release view "${{ steps.version.outputs.tag }}" > /dev/null 2>&1; then
             echo "found=true" >> "$GITHUB_OUTPUT"
             echo "Release ${{ steps.version.outputs.tag }} already exists, nothing to do."
           else
@@ -82,7 +85,6 @@ jobs:
 
       - name: Build release APKs
         env:
-          KEYSTORE_PATH: ${{ runner.temp }}/spectro.jks
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -186,8 +188,13 @@ jobs:
       - name: Publish Release to GitHub
         run: |
           TAG="${{ needs.check-version.outputs.tag }}"
-          gh release create "$TAG" dist/* \
-            --target "${{ github.sha }}" \
-            --title "Spectro $TAG" \
-            --notes-file notes.md \
-            --latest
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG exists. Uploading/updating assets with clobber..."
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* \
+              --target "${{ github.sha }}" \
+              --title "Spectro $TAG" \
+              --notes-file notes.md \
+              --latest
+          fi

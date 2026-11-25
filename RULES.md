@@ -170,11 +170,29 @@ All compiled binaries published to GitHub Releases or distributed to end users *
 
 ### 4. Binary Integrity & Anti-Stale Build Guard
 - **Pre-Build Verification**: Before releasing or tagging a version, the build pipeline must verify that the compiled `BuildConfig.VERSION_NAME` in the APK and the `productVersion` in the Windows executable match the target release tag.
+- **In-App Version Truth Guarantee**:
+  - **Android**: `PackageManager.getPackageInfo().versionName` (displayed in Settings -> About) must strictly match the filename and GitHub Release version. `output-metadata.json` must be verified as containing `"versionName": "<release_version>"` before any APK is uploaded to releases. An old or stale APK from a previous version must **NEVER** be renamed and published.
+  - **Windows**: `package.json` `version`, `dist/app.js` `APP_VERSION`, and the About settings string must strictly match the release tag.
 - **Obsolete Binary Purge**: Build directories (`build/outputs/apk/release/` and `release-build/`) must be cleaned prior to release assembly to prevent bundling stale binaries from prior builds.
 
 ---
 
-## 9. Search Categories & Media Thumbnail Fallback Integrity
+## 9. Network Header Interceptor Protocol (Playback & Media Stability)
+
+1. **YouTube Audio & Video Playback Stream Protection**:
+   - All playback requests directed to YouTube domains (`googlevideo.com`, `youtube-nocookie.com`, `youtube.com`) **MUST NEVER** be treated as image assets.
+   - Audio/video streams and iframe embeds require explicit header spoofing:
+     - `Origin: https://www.youtube-nocookie.com`
+     - `Referer: https://www.youtube-nocookie.com/`
+   - Loose substring checks such as `/vi/`, `=s`, or `=w` must **NEVER** be used to detect image files, as YouTube streaming queries contain encrypted signature parameters (`&s=`, `&ms=`) that would erroneously strip required playback headers.
+2. **Google CDN Media (Avatars & Thumbnails)**:
+   - Requests for images (`resourceType === 'image'` or domains `googleusercontent.com`, `ggpht.com`, `gstatic.com`, `i.ytimg.com`) must have `Origin`, `Referer`, and `Sec-Fetch-Site` stripped to bypass Google CDN `403 Forbidden` restrictions.
+3. **Cross-Origin & Frame Security Stripping**:
+   - Restrictive headers (`x-frame-options`, `content-security-policy`) must be dynamically stripped, and `Access-Control-Allow-Origin: *` injected for all internal resources.
+
+---
+
+## 10. Search Categories & Media Thumbnail Fallback Integrity
 
 1. **Interactive Category Filtering**:
    - The search interface must provide YouTube Music-style category filter pills:
@@ -198,7 +216,7 @@ All compiled binaries published to GitHub Releases or distributed to end users *
 
 ---
 
-## 10. Project Structure
+## 11. Project Structure
 
 ```
 Spectro/

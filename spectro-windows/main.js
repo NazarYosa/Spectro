@@ -200,18 +200,27 @@ function createWindow() {
   // Intercept headers for YouTube and Google CDN Media (avatars, playlist covers, album art)
   session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
     const u = details.url.toLowerCase();
-    const isImage = details.resourceType === 'image' || u.endsWith('.jpg') || u.endsWith('.jpeg') || u.endsWith('.png') || u.endsWith('.webp') || u.includes('/vi/') || u.includes('=w') || u.includes('=s');
 
-    if (isImage || u.includes('googleusercontent.com') || u.includes('ggpht.com') || u.includes('gstatic.com') || u.includes('ytimg.com')) {
+    // 1. YouTube media playback, iframe embeds, and API scripts
+    const isYouTubePlayback = (u.includes('googlevideo.com') || u.includes('youtube-nocookie.com') || u.includes('youtube.com')) && !u.includes('ytimg.com');
+
+    if (isYouTubePlayback) {
+      details.requestHeaders['Origin'] = 'https://www.youtube-nocookie.com';
+      details.requestHeaders['Referer'] = 'https://www.youtube-nocookie.com/';
+    } else if (
+      details.resourceType === 'image' ||
+      u.includes('googleusercontent.com') ||
+      u.includes('ggpht.com') ||
+      u.includes('gstatic.com') ||
+      u.includes('ytimg.com')
+    ) {
+      // 2. Google CDN media (avatars, playlist covers, album art) - strip referrer to bypass 403 Forbidden
       for (const k of Object.keys(details.requestHeaders)) {
         const lk = k.toLowerCase();
         if (lk === 'origin' || lk === 'referer' || lk === 'sec-fetch-site') {
           delete details.requestHeaders[k];
         }
       }
-    } else if (u.includes('googlevideo.com') || u.includes('youtube.com')) {
-      details.requestHeaders['Origin'] = 'https://www.youtube-nocookie.com';
-      details.requestHeaders['Referer'] = 'https://www.youtube-nocookie.com/';
     }
     callback({ cancel: false, requestHeaders: details.requestHeaders });
   });
