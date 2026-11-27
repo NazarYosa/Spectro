@@ -132,24 +132,24 @@ To eliminate discrepancies between release tags, installed binaries, and downloa
 
 ### 1. Single Global Version Truth (Semantic Versioning)
 - Version format strictly follows Semantic Versioning: `MAJOR.MINOR.PATCH` (e.g., `1.0.0`).
-- **Zero Version Drift**: Android and Windows **MUST ALWAYS SHARE THE EXACT SAME VERSION NUMBER**. It is strictly forbidden for Android to be on `v1.0.5` while Windows is on `v1.0.0` or vice versa.
+- **Zero Version Drift**: Android and Windows **MUST ALWAYS SHARE THE EXACT SAME VERSION NUMBER**. It is strictly forbidden for Android to be on `v1.0.6` while Windows is on `v1.0.0` or vice versa.
 
 ### 2. Synchronized Version Inventory
 Whenever bumping the version number, the following files **MUST BE UPDATED IN LOCKSTEP**:
 1. **Android Application**:
    - `spectro-android/build.gradle.kts`:
      ```kotlin
-     val appVersionName = "1.0.5"
+     val appVersionName = "1.0.6"
      ```
      *(The `versionCode` is computed automatically: `major * 10000 + minor * 100 + patch`).*
 2. **Windows Desktop Application**:
    - `spectro-windows/package.json`:
      ```json
-     "version": "1.0.5"
+     "version": "1.0.6"
      ```
    - `spectro-windows/dist/app.js`:
      ```javascript
-     const APP_VERSION = "1.0.5";
+     const APP_VERSION = "1.0.6";
      ```
 3. **Repository Documentation & Release References**:
    - `RULES.md`: Verify active version specification.

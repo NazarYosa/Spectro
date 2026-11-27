@@ -95,7 +95,7 @@
       settings_btn_clear: "Bersihkan",
       settings_group_about: "Tentang Aplikasi",
       settings_about_app: "Spectro Music Player for Windows",
-      settings_about_version: "Versi 1.0.5 (Official Release)",
+      settings_about_version: "Versi 1.0.6 (Official Release)",
       settings_about_license: "Lisensi Bebas GPL-3.0",
       eq_title: "Pengatur Nada (Equalizer)",
       eq_preset: "Pilihan Suara",
@@ -166,7 +166,7 @@
       settings_btn_clear: "Clear Now",
       settings_group_about: "About Spectro",
       settings_about_app: "Spectro Music Player for Windows",
-      settings_about_version: "Version 1.0.5 (Official Release)",
+      settings_about_version: "Version 1.0.6 (Official Release)",
       settings_about_license: "Free & Open Source GPL-3.0",
       eq_title: "Equalizer & Tone",
       eq_preset: "Sound Preset",
@@ -4414,7 +4414,7 @@
     }
   }
 
-  const APP_VERSION = "1.0.5";
+  const APP_VERSION = "1.0.6";
   function checkVersionMigration() {
     try {
       const storedVer = localStorage.getItem("spectro_version");
