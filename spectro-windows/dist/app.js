@@ -739,7 +739,9 @@
     "reaction", "live at", "live from", "live in", "unreleased", "snippet",
     "teaser", "full album", "1 hour", "1hour", "loop", "bass boosted",
     "nightcore", "8d audio", "tiktok version", "live concert", "live performance",
-    "mashup", "aesthetic", "edit", "tutorial", "fingerstyle"
+    "mashup", "aesthetic", "edit", "tutorial", "fingerstyle", "short", "shorts",
+    "synthesia", "chords", "backing track", "whatsapp status", "status video",
+    "top nhạc", "kompilasi", "compilation", "kumpulan lagu"
   ];
 
   function parsePopularity(bylineRuns) {
@@ -767,16 +769,16 @@
     return { views, likes, score };
   }
 
-  function isDerivativeOrJunk(title, artist, seedTitle, pop) {
+  function isDerivativeOrJunk(title, artist, seedTitle, extra = null) {
     const raw = `${title} ${artist}`.toLowerCase();
     if (ExcludedKeywords.some(b => raw.includes(b))) return true;
 
+    // Reject user-generated content (non-official uploads)
+    if (extra?.musicVideoType === "MUSIC_VIDEO_TYPE_UGC") return true;
+
     // Filter low engagement / obscure uploads (< 500k views or < 3000 likes if available)
-    if (pop) {
-      if ((pop.views > 0 && pop.views < 500000) || (pop.likes > 0 && pop.likes < 3000)) {
-        return true;
-      }
-    }
+    if (extra?.views > 0 && extra.views < 500000) return true;
+    if (extra?.likes > 0 && extra.likes < 3000) return true;
 
     // Reject live versions unless seed song was already live
     if (seedTitle && !seedTitle.toLowerCase().includes("live")) {
@@ -797,22 +799,41 @@
   function organizePopularQueue(validTracks, seedArtist) {
     if (!validTracks || validTracks.length <= 1) return validTracks;
 
-    // Ambil kolam lagu-lagu hits teratas (30 lagu teratas dari stasiun radio)
-    // dan kolam lanjutan (sisa lagu untuk perpanjangan antrean)
-    const topHitsPool = validTracks.slice(0, 30);
-    const extendedPool = validTracks.slice(30);
+    // 1. YouTube Music RDAMVM ranking puts the highest-engagement, most viral global hits in the top 20-25 positions.
+    // We limit the seed artist to at most 2 appearances in the top hit pool to avoid mono-artist flood.
+    const normalizedSeedArtist = (seedArtist || "").toLowerCase().trim();
+    let seedArtistCount = 0;
 
-    // Pengacakan dinamis dari seluruh kolam hits teratas setiap pemutaran lagu
-    // Hal ini menjamin ketika lagu A diputar ulang (misal A -> B -> A), antrean yang dihasilkan
-    // SELALU BERBEDA baik dari variasi pilihan lagu hits maupun urutannya.
+    const topHitsPool = [];
+    const secondaryPool = [];
+
+    for (let i = 0; i < validTracks.length; i++) {
+      const track = validTracks[i];
+      const artistLower = (track.artist || "").toLowerCase().trim();
+      const isSeedArtist = normalizedSeedArtist && (artistLower.includes(normalizedSeedArtist) || normalizedSeedArtist.includes(artistLower));
+
+      if (isSeedArtist) {
+        if (seedArtistCount < 2 && i < 25) {
+          seedArtistCount++;
+          topHitsPool.push(track);
+        } else {
+          secondaryPool.push(track);
+        }
+      } else {
+        if (topHitsPool.length < 20) {
+          topHitsPool.push(track);
+        } else {
+          secondaryPool.push(track);
+        }
+      }
+    }
+
+    // 2. Dynamically randomize/shuffle top hits pool so every single play produces a completely fresh mix
     const shuffledTopPool = shuffleArray(topHitsPool);
+    const shuffledSecondary = shuffleArray(secondaryPool);
 
-    const tier1 = shuffledTopPool.slice(0, 14);
-    const tier2 = shuffledTopPool.slice(14);
-    const tier3 = shuffleArray(extendedPool);
-
-    // Interleave artists to prevent 3+ consecutive songs from the same artist
-    function interleaveArtists(tracks, initialArtist) {
+    // 3. Interleave artists to guarantee variety (no 2 consecutive tracks from the same artist)
+    function interleave(tracks, initialArtist) {
       const result = [];
       const pool = [...tracks];
       let lastArtist = (initialArtist || "").toLowerCase().trim();
@@ -830,13 +851,11 @@
       return result;
     }
 
-    const finalT1 = interleaveArtists(tier1, seedArtist);
-    const lastT1Artist = finalT1.length > 0 ? finalT1[finalT1.length - 1].artist : seedArtist;
-    const finalT2 = interleaveArtists(tier2, lastT1Artist);
-    const lastT2Artist = finalT2.length > 0 ? finalT2[finalT2.length - 1].artist : lastT1Artist;
-    const finalT3 = interleaveArtists(tier3, lastT2Artist);
+    const primaryCurated = interleave(shuffledTopPool, seedArtist);
+    const lastArtist = primaryCurated.length > 0 ? primaryCurated[primaryCurated.length - 1].artist : seedArtist;
+    const secondaryCurated = interleave(shuffledSecondary, lastArtist);
 
-    return [...finalT1, ...finalT2, ...finalT3];
+    return [...primaryCurated, ...secondaryCurated];
   }
 
   function parseRadioPage(responseJson) {
@@ -895,6 +914,7 @@
           if (thumbs && thumbs.length > 0) art = thumbs[thumbs.length - 1].url;
 
           const pop = parsePopularity(subRuns);
+          const musicVideoType = item.navigationEndpoint?.watchEndpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType;
 
           tracks.push({
             id: videoId,
@@ -907,7 +927,8 @@
             rawRank: i,
             views: pop.views,
             likes: pop.likes,
-            score: pop.score
+            score: pop.score,
+            musicVideoType
           });
         }
       } else {
@@ -932,6 +953,7 @@
               if (thumbs && thumbs.length > 0) art = thumbs[thumbs.length - 1].url;
 
               const pop = parsePopularity(subRuns);
+              const musicVideoType = item.navigationEndpoint?.watchEndpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType;
 
               tracks.push({
                 id: videoId,
@@ -944,7 +966,8 @@
                 rawRank: tracks.length,
                 views: pop.views,
                 likes: pop.likes,
-                score: pop.score
+                score: pop.score,
+                musicVideoType
               });
             }
           }
@@ -965,22 +988,16 @@
     return parseRadioPage(responseJson).tracks;
   }
 
-  async function playTrackWithRadio(track, preserveHistory = false, clickedIdx = null) {
+  async function playTrackWithRadio(track) {
     if (!track) return;
     
-    // YouTube Music Queue System:
-    // When playing a song from within the queue, retain earlier history and anchor fresh radio recommendations
-    if (preserveHistory && clickedIdx !== null && clickedIdx >= 0 && clickedIdx < state.queue.length) {
-      const history = state.queue.slice(0, clickedIdx).slice(-15);
-      state.queue = [...history, track];
-      state.currentTrackIndex = state.queue.length - 1;
-    } else {
-      state.queue = [track];
-      state.currentTrackIndex = 0;
-    }
-    
-    loadTrack(state.currentTrackIndex, true);
+    // YouTube Music Zero-Stale-Queue Guarantee:
+    // ALWAYS start fresh with the selected track - old queues/history are completely wiped!
+    state.queue = [track];
+    state.currentTrackIndex = 0;
     state.radioContinuation = null;
+    
+    loadTrack(0, true);
 
     // Show loading indicator in queue list while fetching radio tracks
     if (queueList) {
@@ -992,7 +1009,7 @@
       `;
     }
 
-    // 2. Query YouTube Music Radio with 1-Genre & Popular Hits Algorithm (Sama seperti di APK v1.0.0)
+    // 2. Query YouTube Music Radio with 1-Genre & Popular Hits Algorithm
     const seedId = track.videoId || track.id;
     const seedTitle = track.title;
 
@@ -1015,7 +1032,7 @@
           if (!t.videoId || seenIds.has(t.videoId)) return false;
           const k = cleanTitle(t.title);
           if (k && seenKeys.has(k)) return false;
-          if (isDerivativeOrJunk(t.title, t.artist, seedTitle, { views: t.views, likes: t.likes })) return false;
+          if (isDerivativeOrJunk(t.title, t.artist, seedTitle, { views: t.views, likes: t.likes, musicVideoType: t.musicVideoType })) return false;
           seenIds.add(t.videoId);
           if (k) seenKeys.add(k);
           return true;
@@ -1064,7 +1081,7 @@
           if (!t.videoId || seenIds.has(t.videoId)) return false;
           const k = cleanTitle(t.title);
           if (k && seenKeys.has(k)) return false;
-          if (isDerivativeOrJunk(t.title, t.artist, lastTrack.title, { views: t.views, likes: t.likes })) return false;
+          if (isDerivativeOrJunk(t.title, t.artist, lastTrack.title, { views: t.views, likes: t.likes, musicVideoType: t.musicVideoType })) return false;
           seenIds.add(t.videoId);
           if (k) seenKeys.add(k);
           return true;
@@ -1254,7 +1271,7 @@
       } else {
         const cur = state.queue[state.currentTrackIndex];
         if (cur) {
-          playTrackWithRadio(cur, true, state.currentTrackIndex);
+          playTrackWithRadio(cur);
           return;
         }
         nextIndex = 0;
@@ -1393,7 +1410,7 @@
         e.stopPropagation();
         const idx = parseInt(item.getAttribute("data-queue-idx"));
         if (!isNaN(idx) && state.queue[idx]) {
-          playTrackWithRadio(state.queue[idx], true, idx);
+          playTrackWithRadio(state.queue[idx]);
         }
       });
     });
@@ -2925,8 +2942,7 @@
       row.addEventListener("click", () => {
         const idx = parseInt(row.getAttribute("data-pl-track-idx"));
         if (tracks[idx]) {
-          state.queue = [...tracks];
-          loadTrack(idx, true);
+          playTrackWithRadio(tracks[idx]);
         }
       });
     });
@@ -4415,6 +4431,7 @@
     applyLanguageToUI();
     initWindowControls();
     window.playTrackWithRadio = playTrackWithRadio;
+    window.state = state;
     ensureYouTubePlayer();
 
     // Restore sidebar collapsed state

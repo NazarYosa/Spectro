@@ -82,7 +82,9 @@ private val ExcludedKeywords = listOf(
     "reaction", "live at", "live from", "live in", "unreleased", "snippet",
     "teaser", "full album", "1 hour", "1hour", "loop", "bass boosted",
     "nightcore", "8d audio", "tiktok version", "live concert", "live performance",
-    "mashup", "aesthetic", "edit", "tutorial"
+    "mashup", "aesthetic", "edit", "tutorial", "fingerstyle", "short", "shorts",
+    "synthesia", "chords", "backing track", "whatsapp status", "status video",
+    "top nhạc", "kompilasi", "compilation", "kumpulan lagu"
 )
 
 private fun isDerivativeOrJunk(title: String, artist: String?, seedTitle: String?): Boolean {
@@ -90,14 +92,14 @@ private fun isDerivativeOrJunk(title: String, artist: String?, seedTitle: String
     val lowerArtist = (artist ?: "").lowercase()
     if (ExcludedKeywords.any { lowerTitle.contains(it) || lowerArtist.contains(it) }) return true
     if (seedTitle?.lowercase()?.contains("live") != true) {
-        if (lowerTitle.contains("(live") || lowerTitle.contains("[live") || lowerTitle.contains("live version")) {
+        if (lowerTitle.contains("(live") || lowerTitle.contains("[live") || lowerTitle.contains("live version") || lowerTitle.contains("live audio")) {
             return true
         }
     }
     if (seedTitle != null) {
         val cSeed = cleanTitle(seedTitle)
         val cTarget = cleanTitle(title)
-        if (cSeed.isNotEmpty() && cTarget == cSeed) return true
+        if (cSeed.isNotEmpty() && (cSeed == cTarget || cSeed.contains(cTarget) || cTarget.contains(cSeed))) return true
     }
     return false
 }
@@ -105,28 +107,49 @@ private fun isDerivativeOrJunk(title: String, artist: String?, seedTitle: String
 private fun organizePopularQueue(validTracks: List<PlayableTrack>, seedArtist: String?): List<PlayableTrack> {
     if (validTracks.size <= 1) return validTracks
 
-    // Ambil kolam lagu-lagu hits teratas (30 lagu pertama dari stasiun radio)
-    // dan kolam lagu lanjutan (sisa lagu untuk perpanjangan antrean)
-    val topHitsPool = validTracks.take(30)
-    val extendedPool = validTracks.drop(30)
+    // 1. YouTube Music RDAMVM ranking puts the highest-engagement, most viral global hits in the top 20-25 positions.
+    // Limit seed artist to at most 2 appearances in the top hit pool to avoid mono-artist flood.
+    val normalizedSeedArtist = (seedArtist ?: "").lowercase().trim()
+    var seedArtistCount = 0
 
-    // Pengacakan dinamis dari seluruh kolam hits teratas setiap pemutaran lagu
-    // Hal ini menjamin ketika lagu A diputar ulang (misal A -> B -> A), antrean yang dihasilkan
-    // SELALU BERBEDA baik dari komposisi pilihan lagu maupun urutannya.
+    val topHitsPool = mutableListOf<PlayableTrack>()
+    val secondaryPool = mutableListOf<PlayableTrack>()
+
+    for (i in validTracks.indices) {
+        val track = validTracks[i]
+        val artistLower = (track.artist ?: "").lowercase().trim()
+        val isSeedArtist = normalizedSeedArtist.isNotEmpty() &&
+            (artistLower.contains(normalizedSeedArtist) || normalizedSeedArtist.contains(artistLower))
+
+        if (isSeedArtist) {
+            if (seedArtistCount < 2 && i < 25) {
+                seedArtistCount++
+                topHitsPool.add(track)
+            } else {
+                secondaryPool.add(track)
+            }
+        } else {
+            if (topHitsPool.size < 20) {
+                topHitsPool.add(track)
+            } else {
+                secondaryPool.add(track)
+            }
+        }
+    }
+
+    // 2. Dynamically randomize/shuffle top hits pool so every single play produces a completely fresh mix
     val shuffledTopPool = topHitsPool.shuffled()
+    val shuffledSecondary = secondaryPool.shuffled()
 
-    val tier1 = shuffledTopPool.take(14)
-    val tier2 = shuffledTopPool.drop(14)
-    val tier3 = extendedPool.shuffled()
-
-    fun interleaveArtists(tracks: List<PlayableTrack>, initialArtist: String?): List<PlayableTrack> {
+    // 3. Interleave artists to guarantee variety (no 2 consecutive tracks from the same artist)
+    fun interleave(tracks: List<PlayableTrack>, initialArtist: String?): List<PlayableTrack> {
         val result = mutableListOf<PlayableTrack>()
         val pool = tracks.toMutableList()
         var lastArtist = (initialArtist ?: "").lowercase().trim()
 
         while (pool.isNotEmpty()) {
-            var pickIdx = pool.indexOfFirst { track ->
-                val a = (track.artist ?: "").lowercase().trim()
+            var pickIdx = pool.indexOfFirst { t ->
+                val a = (t.artist ?: "").lowercase().trim()
                 a.isNotEmpty() && !lastArtist.contains(a) && !a.contains(lastArtist)
             }
             if (pickIdx == -1) pickIdx = 0
@@ -137,16 +160,13 @@ private fun organizePopularQueue(validTracks: List<PlayableTrack>, seedArtist: S
         return result
     }
 
-    val finalT1 = interleaveArtists(tier1, seedArtist)
-    val lastT1Artist = finalT1.lastOrNull()?.artist ?: seedArtist
-    val finalT2 = interleaveArtists(tier2, lastT1Artist)
-    val lastT2Artist = finalT2.lastOrNull()?.artist ?: lastT1Artist
-    val finalT3 = interleaveArtists(tier3, lastT2Artist)
+    val primaryCurated = interleave(shuffledTopPool, seedArtist)
+    val lastArtist = primaryCurated.lastOrNull()?.artist ?: seedArtist
+    val secondaryCurated = interleave(shuffledSecondary, lastArtist)
 
     val combined = mutableListOf<PlayableTrack>()
-    combined.addAll(finalT1)
-    combined.addAll(finalT2)
-    combined.addAll(finalT3)
+    combined.addAll(primaryCurated)
+    combined.addAll(secondaryCurated)
     return combined
 }
 

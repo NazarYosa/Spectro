@@ -22,25 +22,24 @@ This document serves as the ground-truth technical specification for all develop
 
 Every playback session across Android and Windows must adhere strictly to the following queue pipeline:
 
-1. **Single-Genre & DNA Anchor**:
-   - The queue is seeded strictly from the primary genre and mood characteristics of the seed song via YouTube Music Radio endpoints (`RDAMVM<id>`).
-   - **Strict Negative Keyword Filtering**: The queue must aggressively prune non-official, derivative, or low-fidelity uploads:
-     - `cover`, `karaoke`, `instrumental`, `slowed`, `reverb`, `sped up`, `speed up`, `tribute`, `parody`, `remake`, `guitar cover`, `piano cover`, `drum cover`, `vocal cover`, `ai cover`, `fancam`, `reaction`, `live at`, `live from`, `live in`, `unreleased`, `snippet`, `teaser`, `full album`, `loop`, `bass boosted`, `nightcore`, `8d audio`, `tiktok version`, `live concert`, `live performance`, `mashup`, `aesthetic`, `edit`, `tutorial`.
-   - **Duplicate Suppression**: Strips out alternative versions, duplicate uploads, or songs with identical normalized titles.
-2. **Tiered Popularity Dynamic Shuffling**:
-   - To avoid stale or static queues:
-     - The top pool of popular, chart-topping genre tracks (top 30 recommendations) and extended continuation tracks are fetched.
-     - **Dynamic Shuffling**: The pool is dynamically randomized before assigning tracks into Tier 1 (first 14 tracks) and Tier 2 (next 14 tracks), with remaining pool tracks forming Tier 3.
-     - **Fresh on Every Play Guarantee**: When navigating between tracks (e.g., Song A -> Song B -> returning to Song A), the queue generated for Song A **MUST ALWAYS BE UNIQUE** in track selection and sequence.
-   - **Artist Interleaving**: Prevents clustering by ensuring no artist appears more than twice consecutively, maintaining artist diversity across the genre.
-   - **Queue Structure**:
-     - **Index 0**: Active seed song selected by the user.
-     - **Index 1..N**: Dynamically shuffled, popularity-tiered, artist-interleaved genre recommendations.
-3. **Click Transition Guard**:
-   - On Windows/Desktop, manual track changes within the queue must employ a transition timestamp guard (`lastTrackLoadTime`) to prevent spurious YouTube player `ENDED` events from skipping the newly loaded track.
-4. **Infinite & Self-Extending Playback**:
-   - Clicking any track in the queue initiates playback immediately, preserves prior playback history, and dynamically repopulates upcoming tracks with 50 fresh, randomized genre-matched suggestions rooted in the selected song.
-   - When the remaining queue shrinks to 5 or fewer tracks, the player automatically requests radio continuation chunks, guaranteeing an endless music stream that **NEVER loops back to the start**.
+1. **Strict Genre Locking & DNA Anchor**:
+   - The queue is seeded strictly from the primary genre, style, and mood characteristics of the seed song via YouTube Music Radio endpoints (`RDAMVM<id>`).
+   - When playing a song of a given genre (e.g., Pop / Teen Pop such as "Overboard"), all subsequent tracks in the queue **MUST** strictly belong to that exact same genre.
+   - When a song with a different genre is played (e.g., Rock / Alternative such as "In The End", or Indonesian Pop such as "Hati-Hati di Jalan"), the queue **MUST** cleanly and immediately pivot 100% to that genre.
+2. **Worldwide Viral, Chart-Topping & Popular Hits Only**:
+   - Queue tracks must exclusively comprise globally recognized viral hits, widely listened-to songs, and mainstream popular tracks of that genre. Obscure uploads, low-engagement tracks, fan recordings, and b-sides are strictly barred.
+   - **User-Generated Content (UGC) Suppression**: Discards any video item tagged with `MUSIC_VIDEO_TYPE_UGC` to ensure only official releases (`ATV` or official music videos) enter the queue.
+   - **Strict Negative Keyword Pruning**: The queue aggressively discards non-official, derivative, compilation, or altered uploads:
+     - `cover`, `karaoke`, `instrumental`, `acoustic`, `slowed`, `reverb`, `sped up`, `speed up`, `tribute`, `parody`, `remake`, `guitar cover`, `piano cover`, `drum cover`, `vocal cover`, `ai cover`, `fancam`, `reaction`, `live at`, `live from`, `live in`, `unreleased`, `snippet`, `teaser`, `full album`, `loop`, `bass boosted`, `nightcore`, `8d audio`, `tiktok version`, `live concert`, `live performance`, `mashup`, `aesthetic`, `edit`, `tutorial`, `fingerstyle`, `short`, `shorts`, `synthesia`, `chords`, `backing track`, `whatsapp status`, `status video`, `top nhạc`, `kompilasi`, `compilation`, `kumpulan lagu`.
+   - **Duplicate & Derivative Suppression**: Strips out alternative versions, duplicate uploads, or songs with matching cleaned titles. Live versions are rejected unless the seed song itself was a live recording.
+3. **Dynamic Shuffling & Zero Stale Queue Guarantee ("Selalu Mix & Tanpa Antrean Lama")**:
+   - Every playback action (whether initiated from Search, Home, Library, Queue click, or replaying the exact same song) **MUST ALWAYS START FRESH**:
+     - The previous queue is completely wiped (`state.queue = [track]; state.currentTrackIndex = 0;`).
+     - **Zero Stale Queue**: Old queue history or cached tracks from previous sessions are **NEVER** carried over.
+     - **Dynamic Reshuffle on Replay**: Replaying the exact same song (e.g., Overboard -> Overboard) fetches fresh recommendations and dynamically shuffles the top viral hits pool, producing a completely unique, freshly mixed sequence on every play.
+   - **Artist Interleaving & Diversity**: Prevents monotypic artist flooding by capping the seed artist to at most 2 appearances in the primary hit pool and interleaving artists so that no two consecutive tracks share an artist.
+4. **Infinite & Self-Extending Continuation**:
+   - When the remaining queue shrinks to 5 or fewer tracks, the player automatically requests radio continuation chunks, filtering and interleaving new popular hits so playback remains endless and **NEVER loops back to index 0**.
 
 ---
 
